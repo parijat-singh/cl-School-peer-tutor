@@ -1,0 +1,126 @@
+// src/App.tsx
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { Suspense, lazy } from "react";
+import { AuthProvider, useAuth } from "@/lib/auth-context";
+import { Layout } from "@/components/shared/Layout";
+import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { ProtectedRoute } from "@/components/shared/ProtectedRoute";
+
+// Lazy-loaded pages for code splitting
+const LandingPage     = lazy(() => import("@/pages/LandingPage"));
+const AuthPage        = lazy(() => import("@/pages/AuthPage"));
+const TutorDashboard  = lazy(() => import("@/pages/TutorDashboard"));
+const TuteeBooking    = lazy(() => import("@/pages/TuteeBooking"));
+const TutorProfile    = lazy(() => import("@/pages/TutorProfile"));
+const AdminDashboard  = lazy(() => import("@/pages/AdminDashboard"));
+const RateSession     = lazy(() => import("@/pages/RateSession"));
+const OnboardRole     = lazy(() => import("@/pages/OnboardRole"));
+const NotFound        = lazy(() => import("@/pages/NotFound"));
+
+function AppRoutes() {
+  const { currentUser, loading } = useAuth();
+
+  if (loading) return <LoadingSpinner fullScreen />;
+
+  return (
+    <Suspense fallback={<LoadingSpinner fullScreen />}>
+      <Routes>
+        {/* Public */}
+        <Route path="/" element={<Layout />}>
+          <Route index element={<LandingPage />} />
+          <Route
+            path="auth"
+            element={currentUser ? <Navigate to="/dashboard" replace /> : <AuthPage />}
+          />
+
+          {/* Onboarding — after signup, before dashboard */}
+          <Route
+            path="onboard"
+            element={
+              <ProtectedRoute>
+                <OnboardRole />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Tutor routes */}
+          <Route
+            path="dashboard"
+            element={
+              <ProtectedRoute roles={["tutor", "both"]}>
+                <TutorDashboard />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Tutee routes */}
+          <Route
+            path="find"
+            element={
+              <ProtectedRoute roles={["tutee", "both"]}>
+                <TuteeBooking />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="tutor/:tutorId"
+            element={
+              <ProtectedRoute>
+                <TutorProfile />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Rating page — deep linked from email */}
+          <Route
+            path="rate/:sessionId"
+            element={
+              <ProtectedRoute>
+                <RateSession />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Admin */}
+          <Route
+            path="admin"
+            element={
+              <ProtectedRoute roles={["admin"]}>
+                <AdminDashboard />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Convenience redirect */}
+          <Route
+            path="dashboard"
+            element={
+              <Navigate
+                to={
+                  currentUser?.role === "admin"
+                    ? "/admin"
+                    : currentUser?.role === "tutee"
+                    ? "/find"
+                    : "/dashboard"
+                }
+                replace
+              />
+            }
+          />
+
+          <Route path="*" element={<NotFound />} />
+        </Route>
+      </Routes>
+    </Suspense>
+  );
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AuthProvider>
+        <AppRoutes />
+      </AuthProvider>
+    </BrowserRouter>
+  );
+}

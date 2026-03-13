@@ -1,0 +1,25 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────
+# PeerTutor — Production Compose Override
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up
+# ─────────────────────────────────────────────────────────────────
+
+services:
+  frontend:
+    build:
+      target: production
+    environment:
+      - VITE_USE_EMULATORS=false
+    ports:
+      - "5173:80"  # Nginx serves built assets inside container
+
+  firebase-emulators:
+    # In production, remove the emulators — deploy to real Firebase
+    # This service is intentionally excluded from prod
+    profiles:
+      - dev-only
+
+  nginx:
+    environment:
+      - DOMAIN=${DOMAIN:-peertutor.app}

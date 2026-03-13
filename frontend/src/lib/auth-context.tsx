@@ -1,0 +1,134 @@
+// src/lib/auth-context.tsx
+import React, { createContext, useContext, useEffect, useState } from "react";
+import {
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signOut,
+  sendPasswordResetEmail,
+  type User as FirebaseUser,
+} from "firebase/auth";
+import { doc, setDoc, serverTimestamp } from "firebase/firestore";
+import { auth, db } from "./firebase";
+import { getUserDoc } from "./firestore";
+import type { AuthUser, UserRole, GradeLevel } from "./types";
+
+interface AuthContextValue {
+  currentUser: AuthUser | null;
+  firebaseUser: FirebaseUser | null;
+  loading: boolean;
+  signIn: (email: string, password: string) => Promise<void>;
+  signUp: (params: SignUpParams) => Promise<void>;
+  logOut: () => Promise<void>;
+  resetPassword: (email: string) => Promise<void>;
+}
+
+interface SignUpParams {
+  email: string;
+  password: string;
+  name: string;
+  grade: GradeLevel;
+  role: UserRole;
+}
+
+// Allowed school email domains pattern
+const SCHOOL_EMAIL_PATTERN = /\.(edu|k12\..{2,3}\.(us|ca|uk))$/i;
+
+export function validateSchoolEmail(email: string): boolean {
+  const domain = email.split("@")[1];
+  if (!domain) return false;
+  return SCHOOL_EMAIL_PATTERN.test(domain);
+}
+
+const AuthContext = createContext<AuthContextValue | null>(null);
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
+      setFirebaseUser(fbUser);
+      if (fbUser) {
+        const userDoc = await getUserDoc(fbUser.uid);
+        if (userDoc) {
+          setCurrentUser({
+            uid: fbUser.uid,
+            email: fbUser.email!,
+            name: userDoc.name,
+            role: userDoc.role,
+            grade: userDoc.grade,
+            schoolDomain: userDoc.schoolDomain,
+            status: userDoc.status,
+          });
+        }
+      } else {
+        setCurrentUser(null);
+      }
+      setLoading(false);
+    });
+    return unsubscribe;
+  }, []);
+
+  const signIn = async (email: string, password: string) => {
+    await signInWithEmailAndPassword(auth, email, password);
+    // onAuthStateChanged above will populate currentUser
+  };
+
+  const signUp = async ({ email, password, name, grade, role }: SignUpParams) => {
+    if (!validateSchoolEmail(email)) {
+      throw new Error("Only school email addresses (.edu or .k12) are accepted.");
+    }
+
+    const domain = email.split("@")[1];
+
+    // Check domain is registered (Cloud Function handles this too but we pre-validate)
+    // Domain check happens server-side in onUserCreate Cloud Function
+
+    const credential = await createUserWithEmailAndPassword(auth, email, password);
+    const { uid } = credential.user;
+
+    // Determine if COPPA consent required (grade 6 or 7 → likely under 13)
+    const needsConsent = grade === "6th" || grade === "7th";
+
+    // Write user document — Cloud Function will also set custom claims
+    await setDoc(doc(db, "users", uid), {
+      name,
+      email,
+      grade,
+      role,
+      schoolDomain: domain,
+      status: needsConsent ? "pending_consent" : "active",
+      subjects: [],
+      bio: "",
+      avgRating: 0,
+      reviewCount: 0,
+      isActive: role === "tutor" || role === "both",
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  };
+
+  const logOut = async () => {
+    await signOut(auth);
+  };
+
+  const resetPassword = async (email: string) => {
+    await sendPasswordResetEmail(auth, email);
+  };
+
+  return (
+    <AuthContext.Provider
+      value={{ currentUser, firebaseUser, loading, signIn, signUp, logOut, resetPassword }}
+    >
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+export function useAuth(): AuthContextValue {
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error("useAuth must be used within <AuthProvider>");
+  return ctx;
+}

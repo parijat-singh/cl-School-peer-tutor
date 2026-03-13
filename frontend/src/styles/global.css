@@ -1,0 +1,33 @@
+/* src/styles/global.css */
+@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-family: 'DM Sans', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .font-display {
+    font-family: 'DM Serif Display', Georgia, serif;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  ::selection {
+    background-color: #D6E4FF;
+    color: #0D1B3E;
+  }
+}
+
+@layer utilities {
+  .bg-navy-DEFAULT { background-color: #0D1B3E; }
+  .bg-navy-light   { background-color: #152548; }
+  .bg-navy-mid     { background-color: #1E3460; }
+  .text-navy-DEFAULT { color: #0D1B3E; }
+}

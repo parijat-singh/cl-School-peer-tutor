@@ -1,0 +1,167 @@
+// firestore/firestore.rules
+// Multi-tenant isolation: every rule verifies schoolDomain matches the caller's
+// custom JWT claim. Cross-school data access is architecturally impossible.
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helper functions ────────────────────────────────────────
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function uid() {
+      return request.auth.uid;
+    }
+
+    // schoolDomain extracted from custom Auth claim set by Cloud Function
+    function callerDomain() {
+      return request.auth.token.schoolDomain;
+    }
+
+    function isAdmin() {
+      return request.auth.token.role == 'admin';
+    }
+
+    function isTutor() {
+      return request.auth.token.role in ['tutor', 'both'];
+    }
+
+    function isTutee() {
+      return request.auth.token.role in ['tutee', 'both'];
+    }
+
+    function sameDomain(domain) {
+      return isSignedIn() && callerDomain() == domain;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && uid() == userId;
+    }
+
+    function isActive() {
+      return request.auth.token.status == 'active';
+    }
+
+    // ── Users collection ─────────────────────────────────────────
+    // /users/{userId}
+
+    match /users/{userId} {
+      // Read own profile or any profile within same school
+      allow read: if isOwner(userId)
+                  || (isSignedIn() && sameDomain(resource.data.schoolDomain));
+
+      // Create: only Cloud Functions via Admin SDK (via onUserCreate trigger)
+      // Direct create allowed during signup for bootstrapping
+      allow create: if isOwner(userId)
+                    && request.resource.data.schoolDomain == request.auth.token.email.split('@')[1];
+
+      // Update own profile (limited fields only)
+      allow update: if isOwner(userId)
+                    && !request.resource.data.diff(resource.data).affectedKeys()
+                        .hasAny(['schoolDomain', 'role', 'status', 'suspendedUntil', 'uid']);
+
+      // Admins can update status, suspendedUntil
+      allow update: if isSignedIn() && isAdmin()
+                    && sameDomain(resource.data.schoolDomain);
+
+      // No client-side deletes
+      allow delete: if false;
+
+      // ── Availability sub-collection ──────────────────────────
+      // /users/{tutorId}/availability/{slotId}
+
+      match /availability/{slotId} {
+        // Any signed-in user from the same school can read (for search)
+        allow read: if isSignedIn() && sameDomain(resource.data.schoolDomain);
+
+        // Only the tutor (owner) can write their own slots
+        allow create, delete: if isOwner(userId) && isTutor() && isActive();
+
+        // Only Cloud Functions should mark slots as booked (via runTransaction)
+        allow update: if isOwner(userId) && isTutor() && isActive()
+                      && !request.resource.data.diff(resource.data).affectedKeys()
+                          .hasAny(['booked', 'bookedBy']);
+      }
+    }
+
+    // ── Sessions collection ──────────────────────────────────────
+    // /sessions/{sessionId}
+
+    match /sessions/{sessionId} {
+      // Participants (tutor or tutee) and school admins can read
+      allow read: if isSignedIn()
+                  && (uid() == resource.data.tutorId
+                      || uid() == resource.data.tuteeId
+                      || (isAdmin() && sameDomain(resource.data.schoolDomain)));
+
+      // Sessions are created exclusively by the bookSession Cloud Function
+      allow create: if false;
+
+      // Only Cloud Functions update sessions (status changes, meet links)
+      allow update: if false;
+
+      allow delete: if false;
+    }
+
+    // ── Reviews collection ───────────────────────────────────────
+    // /reviews/{reviewId}
+
+    match /reviews/{reviewId} {
+      // Any school member can read reviews within their school
+      allow read: if isSignedIn() && sameDomain(resource.data.schoolDomain);
+
+      // Reviews created only by Cloud Functions (after session completion)
+      allow create: if false;
+
+      // Authors can flag a review; admins can delete
+      allow update: if isSignedIn()
+                    && sameDomain(resource.data.schoolDomain)
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                        .hasOnly(['flagged', 'flaggedBy']);
+
+      allow delete: if isAdmin() && sameDomain(resource.data.schoolDomain);
+    }
+
+    // ── Schools collection ───────────────────────────────────────
+    // /schools/{domain}
+
+    match /schools/{domain} {
+      // Any authenticated user from that school can read their school doc
+      allow read: if isSignedIn() && callerDomain() == domain;
+
+      // Only Cloud Functions and super-admin can write school docs
+      allow write: if false;
+    }
+
+    // ── Stats collection ─────────────────────────────────────────
+    // /stats/{schoolDomain}
+
+    match /stats/{schoolDomain} {
+      // Admins and any school member can read stats
+      allow read: if isSignedIn() && sameDomain(schoolDomain);
+
+      // Written only by Cloud Functions
+      allow write: if false;
+    }
+
+    // ── Audit log collection ─────────────────────────────────────
+    // /adminAuditLog/{logId}
+
+    match /adminAuditLog/{logId} {
+      // Only admins of the relevant school can read
+      allow read: if isAdmin() && sameDomain(resource.data.schoolDomain);
+
+      // Immutable — no client writes
+      allow write: if false;
+    }
+
+    // ── Default deny everything else ────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

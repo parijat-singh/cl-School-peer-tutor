@@ -1,0 +1,43 @@
+# Environment
+.env
+.env.local
+.env.production
+
+# Dependencies
+node_modules/
+*/node_modules/
+
+# Build outputs
+dist/
+build/
+.firebase/
+functions/lib/
+
+# Firebase
+.firebase-data/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+storage.rules.bak
+
+# Service account keys - NEVER commit
+*service-account*.json
+*credentials*.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Certs (local dev only)
+nginx/certs/*.pem
+nginx/certs/*.key
+nginx/certs/*.crt
+
+# Logs
+*.log
+npm-debug.log*
