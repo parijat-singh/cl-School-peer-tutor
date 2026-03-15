@@ -5,7 +5,7 @@ import { searchTutors, subscribeUserSessions } from "@/lib/firestore";
 import {
   Button, Input, Select, Modal, Toast, Badge, StarRating, Divider,
 } from "@/components/shared/ui";
-import type { TutorCard, AvailabilitySlot, SessionDoc, GradeLevel } from "@/lib/types";
+import type { TutorCard as TutorCardType, AvailabilitySlot, SessionDoc, GradeLevel } from "@/lib/types";
 import { DAYS_OF_WEEK } from "@/lib/types";
 import { doc, updateDoc, addDoc, collection, serverTimestamp, Timestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
@@ -22,6 +22,7 @@ const GRADES: { value: GradeLevel; label: string }[] = [
 ];
 import {
   Search, Star, Clock, Video, Calendar, ChevronRight, Filter, User,
+  Repeat, CalendarDays,
 } from "lucide-react";
 import { format } from "date-fns";
 
@@ -31,13 +32,45 @@ const DEFAULT_SUBJECTS = [
   "English","History","Spanish","French","Computer Science","Economics",
 ];
 
+/** Get next N occurrences of a day-of-week starting from tomorrow */
+function getUpcomingDatesForDay(day: string, weeks = 4): string[] {
+  const dayNames = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+  const dayIdx = dayNames.indexOf(day);
+  if (dayIdx < 0) return [];
+  const dates: string[] = [];
+  const now = new Date();
+  const diff = (dayIdx - now.getDay() + 7) % 7 || 7;
+  for (let w = 0; w < weeks; w++) {
+    const d = new Date(now);
+    d.setDate(now.getDate() + diff + w * 7);
+    dates.push(d.toISOString().split("T")[0]);
+  }
+  return dates;
+}
+
+/** Get available dates for a slot (filtering out booked and cancelled) */
+function getAvailableDates(slot: AvailabilitySlot): string[] {
+  if (!slot.recurring) {
+    // One-off: just return the date if not booked and in the future
+    const today = new Date().toISOString().split("T")[0];
+    if (slot.booked || !slot.date || slot.date < today) return [];
+    return [slot.date];
+  }
+  // Recurring: next 4 weeks minus cancelled/booked
+  const dates = getUpcomingDatesForDay(slot.day);
+  const cancelled = new Set(slot.cancelledDates ?? []);
+  const booked = slot.bookedDates ?? {};
+  return dates.filter((d) => !cancelled.has(d) && !booked[d]);
+}
+
 export default function TuteeBooking() {
   const { currentUser } = useAuth();
 
   // Search state
   const [subject, setSubject]   = useState("");
   const [day, setDay]           = useState("");
-  const [tutors, setTutors]     = useState<TutorCard[]>([]);
+  const [date, setDate]         = useState("");
+  const [tutors, setTutors]     = useState<TutorCardType[]>([]);
   const [searching, setSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
 
@@ -46,10 +79,11 @@ export default function TuteeBooking() {
   const [tab, setTab]           = useState<"search" | "sessions">("search");
 
   // Modals
-  const [bookModal, setBookModal]     = useState<{ tutor: TutorCard; slot: AvailabilitySlot } | null>(null);
+  const [bookModal, setBookModal]     = useState<{ tutor: TutorCardType; slot: AvailabilitySlot } | null>(null);
   const [rateModal, setRateModal]     = useState<SessionDoc | null>(null);
   const [cancelModal, setCancelModal] = useState<SessionDoc | null>(null);
   const [bookingSubject, setBookingSubject] = useState("");
+  const [bookingDate, setBookingDate] = useState("");
 
   // Rating
   const [stars, setStars]       = useState(0);
@@ -72,27 +106,31 @@ export default function TuteeBooking() {
       schoolDomain: currentUser.schoolDomain,
       subject: subject || undefined,
       day: day || undefined,
+      date: date || undefined,
     });
     setTutors(results);
     setSearching(false);
   };
 
   const handleBook = async () => {
-    if (!bookModal || !currentUser) return;
+    if (!bookModal || !currentUser || !bookingDate) return;
     try {
-      // Find the next occurrence of the day
-      const today = new Date();
-      const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-      const dayIndex = dayNames.indexOf(bookModal.slot.day);
-      const diff = (dayIndex - today.getDay() + 7) % 7 || 7;
-      const date = new Date(today);
-      date.setDate(today.getDate() + diff);
+      const dateObj = new Date(bookingDate + "T12:00:00");
+      const slot = bookModal.slot;
 
-      // Mark slot as booked
-      await updateDoc(doc(db, "users", bookModal.tutor.uid, "availability", bookModal.slot.id), {
-        booked: true,
-        bookedBy: currentUser.uid,
-      });
+      if (slot.recurring) {
+        // For recurring slots: update bookedDates map
+        const bookedDates = { ...(slot.bookedDates ?? {}), [bookingDate]: currentUser.uid };
+        await updateDoc(doc(db, "users", bookModal.tutor.uid, "availability", slot.id), {
+          bookedDates,
+        });
+      } else {
+        // For one-off slots: mark as booked
+        await updateDoc(doc(db, "users", bookModal.tutor.uid, "availability", slot.id), {
+          booked: true,
+          bookedBy: currentUser.uid,
+        });
+      }
 
       // Create session doc
       await addDoc(collection(db, "sessions"), {
@@ -101,21 +139,25 @@ export default function TuteeBooking() {
         tutorName: bookModal.tutor.name,
         tuteeName: currentUser.name,
         subject: bookingSubject || bookModal.tutor.subjects[0],
-        slotId: bookModal.slot.id,
-        day: bookModal.slot.day,
-        startTime: bookModal.slot.startTime,
-        endTime: bookModal.slot.endTime,
-        duration: bookModal.slot.duration,
-        scheduledDate: Timestamp.fromDate(date),
+        slotId: slot.id,
+        day: slot.day,
+        startTime: slot.startTime,
+        endTime: slot.endTime,
+        duration: slot.duration,
+        scheduledDate: Timestamp.fromDate(dateObj),
         status: "upcoming",
         meetLinkStatus: "pending",
         schoolDomain: currentUser.schoolDomain,
         createdAt: serverTimestamp(),
         tutorRated: false,
         tuteeRated: false,
+        // Track booking type for cancellation logic
+        recurringSlot: slot.recurring,
+        bookedDate: bookingDate,
       });
 
       setBookModal(null);
+      setBookingDate("");
       setTab("sessions");
       setToast({ msg: "Session booked!", type: "success" });
     } catch (err: unknown) {
@@ -133,10 +175,26 @@ export default function TuteeBooking() {
       });
       // Free the slot
       if (cancelModal.slotId) {
-        await updateDoc(doc(db, "users", cancelModal.tutorId, "availability", cancelModal.slotId), {
-          booked: false,
-          bookedBy: null,
-        });
+        const sessionData = cancelModal as SessionDoc & { recurringSlot?: boolean; bookedDate?: string };
+        if (sessionData.recurringSlot && sessionData.bookedDate) {
+          // For recurring: remove date from bookedDates
+          const slotRef = doc(db, "users", cancelModal.tutorId, "availability", cancelModal.slotId);
+          // We need to fetch current bookedDates and remove this date
+          const { getDoc: getDocFn } = await import("firebase/firestore");
+          const slotSnap = await getDocFn(slotRef);
+          if (slotSnap.exists()) {
+            const data = slotSnap.data();
+            const bookedDates = { ...(data.bookedDates ?? {}) };
+            delete bookedDates[sessionData.bookedDate];
+            await updateDoc(slotRef, { bookedDates });
+          }
+        } else {
+          // For one-off: mark slot as unbooked
+          await updateDoc(doc(db, "users", cancelModal.tutorId, "availability", cancelModal.slotId), {
+            booked: false,
+            bookedBy: null,
+          });
+        }
       }
       setToast({ msg: "Session cancelled", type: "success" });
     } catch {
@@ -148,7 +206,6 @@ export default function TuteeBooking() {
   const handleRate = async () => {
     if (!rateModal || stars === 0 || !currentUser) return;
     try {
-      // Create review doc
       await addDoc(collection(db, "reviews"), {
         sessionId: rateModal.id,
         authorId: currentUser.uid,
@@ -161,13 +218,9 @@ export default function TuteeBooking() {
         schoolDomain: currentUser.schoolDomain,
         createdAt: serverTimestamp(),
       });
-
-      // Mark session as rated by tutee
       await updateDoc(doc(db, "sessions", rateModal.id), {
         tuteeRated: true,
       });
-
-      // Update tutor's avgRating and reviewCount
       const tutorDoc = await getUserDoc(rateModal.tutorId);
       if (tutorDoc) {
         const oldCount = tutorDoc.reviewCount ?? 0;
@@ -179,7 +232,6 @@ export default function TuteeBooking() {
           reviewCount: newCount,
         });
       }
-
       setRateModal(null);
       setStars(0);
       setReviewText("");
@@ -212,6 +264,9 @@ export default function TuteeBooking() {
   const upcoming  = sessions.filter((s) => s.status === "upcoming");
   const completed = sessions.filter((s) => s.status === "completed" && !s.tuteeRated);
   const allDone   = sessions.filter((s) => s.status === "completed");
+
+  // Get min date for date filter (today)
+  const minDate = new Date().toISOString().split("T")[0];
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
@@ -256,28 +311,46 @@ export default function TuteeBooking() {
       {tab === "search" && (
         <>
           {/* Filters */}
-          <div className="bg-white border border-gray-200 rounded-lg p-4 mb-6 flex flex-col sm:flex-row gap-3">
-            <Select
-              label="Subject"
-              placeholder="Any subject"
-              options={DEFAULT_SUBJECTS.map((s) => ({ value: s, label: s }))}
-              value={subject}
-              onChange={(e) => setSubject(e.target.value)}
-              className="flex-1"
-            />
-            <Select
-              label="Day"
-              placeholder="Any day"
-              options={DAYS_OF_WEEK.map((d) => ({ value: d, label: d }))}
-              value={day}
-              onChange={(e) => setDay(e.target.value)}
-              className="flex-1"
-            />
-            <div className="flex items-end">
-              <Button onClick={handleSearch} loading={searching} className="w-full sm:w-auto">
-                <Search className="w-4 h-4" /> Search
-              </Button>
+          <div className="bg-white border border-gray-200 rounded-lg p-4 mb-6">
+            <div className="flex flex-col sm:flex-row gap-3">
+              <Select
+                label="Subject"
+                placeholder="Any subject"
+                options={DEFAULT_SUBJECTS.map((s) => ({ value: s, label: s }))}
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+                className="flex-1"
+              />
+              <Select
+                label="Day"
+                placeholder="Any day"
+                options={DAYS_OF_WEEK.map((d) => ({ value: d, label: d }))}
+                value={day}
+                onChange={(e) => setDay(e.target.value)}
+                className="flex-1"
+              />
+              <Input
+                label="Specific Date"
+                type="date"
+                min={minDate}
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="flex-1"
+              />
+              <div className="flex items-end">
+                <Button onClick={handleSearch} loading={searching} className="w-full sm:w-auto">
+                  <Search className="w-4 h-4" /> Search
+                </Button>
+              </div>
             </div>
+            {(subject || day || date) && (
+              <button
+                onClick={() => { setSubject(""); setDay(""); setDate(""); }}
+                className="mt-2 text-xs text-brand-600 hover:text-brand-700"
+              >
+                Clear all filters
+              </button>
+            )}
           </div>
 
           {/* Results */}
@@ -299,7 +372,13 @@ export default function TuteeBooking() {
                 <TutorCard
                   key={tutor.uid}
                   tutor={tutor}
-                  onBook={(slot) => { setBookModal({ tutor, slot }); setBookingSubject(tutor.subjects[0] ?? ""); }}
+                  onBook={(slot) => {
+                    const availDates = getAvailableDates(slot);
+                    setBookModal({ tutor, slot });
+                    setBookingSubject(tutor.subjects[0] ?? "");
+                    // Pre-select first available date
+                    setBookingDate(availDates[0] ?? "");
+                  }}
                 />
               ))}
             </div>
@@ -317,7 +396,6 @@ export default function TuteeBooking() {
       {/* ── Sessions Tab ── */}
       {tab === "sessions" && (
         <div className="flex flex-col gap-6">
-          {/* Rate prompt */}
           {completed.length > 0 && (
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
               <p className="text-sm font-medium text-amber-800 mb-3">
@@ -337,7 +415,6 @@ export default function TuteeBooking() {
             </div>
           )}
 
-          {/* Upcoming */}
           <div>
             <h2 className="font-display text-xl text-gray-900 mb-3">Upcoming</h2>
             {upcoming.length === 0 ? (
@@ -358,7 +435,6 @@ export default function TuteeBooking() {
             )}
           </div>
 
-          {/* Past */}
           {allDone.length > 0 && (
             <div>
               <h2 className="font-display text-xl text-gray-900 mb-3">Past Sessions</h2>
@@ -380,31 +456,78 @@ export default function TuteeBooking() {
 
       {/* ── Book Modal ── */}
       <Modal open={!!bookModal} onClose={() => setBookModal(null)} title="Book a Session">
-        {bookModal && (
-          <div className="flex flex-col gap-4">
-            <div className="bg-gray-50 rounded p-4 text-sm">
-              <p className="font-medium text-gray-900 mb-1">Tutor: {bookModal.tutor.name}</p>
-              <p className="text-gray-500">
-                {bookModal.slot.day} · {bookModal.slot.startTime}–{bookModal.slot.endTime}
-                {" "}({bookModal.slot.duration} min)
-              </p>
+        {bookModal && (() => {
+          const availDates = getAvailableDates(bookModal.slot);
+          return (
+            <div className="flex flex-col gap-4">
+              <div className="bg-gray-50 rounded p-4 text-sm">
+                <p className="font-medium text-gray-900 mb-1">Tutor: {bookModal.tutor.name}</p>
+                <div className="flex items-center gap-2 text-gray-500">
+                  {bookModal.slot.recurring ? (
+                    <>
+                      <Repeat className="w-3 h-3 text-brand-500" />
+                      <span>Every {bookModal.slot.day}</span>
+                    </>
+                  ) : (
+                    <>
+                      <CalendarDays className="w-3 h-3 text-green-500" />
+                      <span>{bookModal.slot.date ? format(new Date(bookModal.slot.date + "T12:00:00"), "EEE, MMM d, yyyy") : bookModal.slot.day}</span>
+                    </>
+                  )}
+                  <span>· {bookModal.slot.startTime}–{bookModal.slot.endTime} ({bookModal.slot.duration} min)</span>
+                </div>
+              </div>
+
+              {/* Date selection */}
+              <div>
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                  Select Date
+                </p>
+                {availDates.length === 0 ? (
+                  <p className="text-sm text-red-500">No available dates for this slot.</p>
+                ) : availDates.length === 1 ? (
+                  <div className="px-3 py-2.5 bg-green-50 border border-green-100 rounded text-sm text-green-700 font-medium">
+                    {format(new Date(availDates[0] + "T12:00:00"), "EEEE, MMMM d, yyyy")}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2">
+                    {availDates.map((d) => (
+                      <button
+                        key={d}
+                        type="button"
+                        onClick={() => setBookingDate(d)}
+                        className={`px-3 py-2.5 rounded border text-sm font-medium transition-colors ${
+                          bookingDate === d
+                            ? "bg-brand-50 border-brand-300 text-brand-700"
+                            : "bg-white border-gray-200 text-gray-600 hover:border-brand-200"
+                        }`}
+                      >
+                        {format(new Date(d + "T12:00:00"), "EEE, MMM d")}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <Select
+                label="Subject"
+                options={bookModal.tutor.subjects.map((s) => ({ value: s, label: s }))}
+                value={bookingSubject}
+                onChange={(e) => setBookingSubject(e.target.value)}
+              />
+              <div className="bg-blue-50 border border-blue-100 rounded p-3 text-xs text-blue-700">
+                A Google Meet link and calendar invite will be sent to your school email within 30 seconds.
+              </div>
+              <Divider />
+              <div className="flex justify-end gap-2">
+                <Button variant="secondary" onClick={() => setBookModal(null)}>Cancel</Button>
+                <Button onClick={handleBook} disabled={!bookingDate || availDates.length === 0}>
+                  Confirm Booking
+                </Button>
+              </div>
             </div>
-            <Select
-              label="Subject"
-              options={bookModal.tutor.subjects.map((s) => ({ value: s, label: s }))}
-              value={bookingSubject}
-              onChange={(e) => setBookingSubject(e.target.value)}
-            />
-            <div className="bg-blue-50 border border-blue-100 rounded p-3 text-xs text-blue-700">
-              A Google Meet link and calendar invite will be sent to your school email within 30 seconds.
-            </div>
-            <Divider />
-            <div className="flex justify-end gap-2">
-              <Button variant="secondary" onClick={() => setBookModal(null)}>Cancel</Button>
-              <Button onClick={handleBook}>Confirm Booking</Button>
-            </div>
-          </div>
-        )}
+          );
+        })()}
       </Modal>
 
       {/* ── Rate Modal ── */}
@@ -481,7 +604,7 @@ export default function TuteeBooking() {
 function TutorCard({
   tutor, onBook,
 }: {
-  tutor: TutorCard;
+  tutor: TutorCardType;
   onBook: (slot: AvailabilitySlot) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -539,8 +662,17 @@ function TutorCard({
               key={slot.id}
               className="flex items-center justify-between bg-gray-50 rounded px-3 py-2"
             >
-              <div className="text-xs text-gray-700">
-                <span className="font-medium">{slot.day}</span>
+              <div className="text-xs text-gray-700 flex items-center gap-1.5">
+                {slot.recurring ? (
+                  <Repeat className="w-3 h-3 text-brand-400" />
+                ) : (
+                  <CalendarDays className="w-3 h-3 text-green-400" />
+                )}
+                <span className="font-medium">
+                  {slot.recurring
+                    ? `Every ${slot.day}`
+                    : (slot.date ? format(new Date(slot.date + "T12:00:00"), "EEE, MMM d") : slot.day)}
+                </span>
                 {" · "}{slot.startTime}–{slot.endTime}{" "}
                 <span className="text-gray-400">({slot.duration} min)</span>
               </div>

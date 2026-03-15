@@ -1,9 +1,10 @@
 // src/pages/TutorDashboard.tsx
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useAuth } from "@/lib/auth-context";
 import {
   subscribeTutorSlots, subscribeUserSessions,
   addAvailabilitySlot, removeAvailabilitySlot,
+  updateAvailabilitySlot, cancelRecurringDate, uncancelRecurringDate,
   getUserDoc,
 } from "@/lib/firestore";
 import {
@@ -26,10 +27,13 @@ const GRADES: { value: GradeLevel; label: string }[] = [
   { value: "11th", label: "11th Grade" },
   { value: "12th", label: "12th Grade" },
 ];
-import { PlusCircle, Trash2, Video, Clock, BookOpen, Star, Users, Calendar } from "lucide-react";
-import { format } from "date-fns";
+import {
+  PlusCircle, Trash2, Video, Clock, BookOpen, Star, Users, Calendar,
+  Repeat, CalendarDays, X as XIcon, Edit2,
+} from "lucide-react";
+import { format, addDays } from "date-fns";
 
-// ── Subjects list (school admin manages this; using defaults here) ──
+// ── Subjects list ──
 const DEFAULT_SUBJECTS = [
   "Algebra","Geometry","Pre-Calculus","Calculus","Statistics",
   "Biology","Chemistry","Physics","Earth Science",
@@ -37,10 +41,15 @@ const DEFAULT_SUBJECTS = [
 ];
 
 const slotSchema = z.object({
-  day:       z.string().min(1, "Select a day"),
+  slotType:  z.enum(["recurring", "specific"]),
+  day:       z.string().optional(),
+  date:      z.string().optional(),
   startTime: z.string().min(1, "Select start time"),
   duration:  z.enum(["30","45","60"]),
-});
+}).refine(
+  (d) => d.slotType === "recurring" ? !!d.day : !!d.date,
+  { message: "Select a day or date", path: ["day"] }
+);
 
 const profileSchema = z.object({
   name:     z.string().min(2, "Name must be at least 2 characters"),
@@ -61,12 +70,41 @@ function addMinutes(time: string, mins: number): string {
   return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
 }
 
+/** Get next N occurrences of a day-of-week starting from tomorrow */
+function getUpcomingDatesForDay(day: string, weeks = 4): string[] {
+  const dayNames = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+  const dayIdx = dayNames.indexOf(day);
+  if (dayIdx < 0) return [];
+  const dates: string[] = [];
+  const now = new Date();
+  const diff = (dayIdx - now.getDay() + 7) % 7 || 7;
+  for (let w = 0; w < weeks; w++) {
+    const d = new Date(now);
+    d.setDate(now.getDate() + diff + w * 7);
+    dates.push(d.toISOString().split("T")[0]);
+  }
+  return dates;
+}
+
+/** Day-of-week from a YYYY-MM-DD string */
+function dayFromDate(dateStr: string): string {
+  const d = new Date(dateStr + "T12:00:00");
+  return ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"][d.getDay()];
+}
+
 const TIME_OPTIONS = Array.from({ length: 24 }, (_, h) =>
   ["00", "30"].map((m) => {
     const label = `${String(h).padStart(2, "0")}:${m}`;
     return { value: label, label };
   })
 ).flat();
+
+// Get min date for date input (tomorrow)
+function getMinDate(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  return d.toISOString().split("T")[0];
+}
 
 // ── Component ────────────────────────────────────────────────────
 export default function TutorDashboard() {
@@ -82,8 +120,21 @@ export default function TutorDashboard() {
   const [reviewText, setReviewText]     = useState("");
   const [selectedSubjects, setSelectedSubjects] = useState<string[]>([]);
 
-  const slotForm = useForm<SlotForm>({ resolver: zodResolver(slotSchema), defaultValues: { duration: "60" } });
+  // Manage dates modal for recurring slots
+  const [manageDatesModal, setManageDatesModal] = useState<AvailabilitySlot | null>(null);
+
+  // Edit slot modal
+  const [editSlotModal, setEditSlotModal] = useState<AvailabilitySlot | null>(null);
+  const [editStartTime, setEditStartTime] = useState("");
+  const [editDuration, setEditDuration]   = useState("60");
+
+  const slotForm = useForm<SlotForm>({
+    resolver: zodResolver(slotSchema),
+    defaultValues: { duration: "60", slotType: "recurring" },
+  });
   const profileForm = useForm<ProfileForm>({ resolver: zodResolver(profileSchema) });
+
+  const slotType = slotForm.watch("slotType");
 
   useEffect(() => {
     if (!currentUser) return;
@@ -94,24 +145,64 @@ export default function TutorDashboard() {
 
   const handleAddSlot = slotForm.handleSubmit(async (data) => {
     if (!currentUser) return;
-    const dur = Number(data.duration) as 30 | 45 | 60;
-    await addAvailabilitySlot(currentUser.uid, {
-      day: data.day as (typeof DAYS_OF_WEEK)[number],
-      startTime: data.startTime,
-      endTime: addMinutes(data.startTime, dur),
-      duration: dur,
-      schoolDomain: currentUser.schoolDomain,
-      bookedBy: undefined,
-    });
-    slotForm.reset();
-    setSlotModal(false);
-    setToast({ msg: "Slot added", type: "success" });
+    try {
+      const dur = Number(data.duration) as 30 | 45 | 60;
+      const isRecurring = data.slotType === "recurring";
+      const day = isRecurring
+        ? (data.day as (typeof DAYS_OF_WEEK)[number])
+        : (dayFromDate(data.date!) as (typeof DAYS_OF_WEEK)[number]);
+
+      await addAvailabilitySlot(currentUser.uid, {
+        recurring: isRecurring,
+        day,
+        date: isRecurring ? undefined : data.date!,
+        startTime: data.startTime,
+        endTime: addMinutes(data.startTime, dur),
+        duration: dur,
+        schoolDomain: currentUser.schoolDomain,
+        bookedDates: isRecurring ? {} : undefined,
+        cancelledDates: isRecurring ? [] : undefined,
+      });
+      slotForm.reset({ duration: "60", slotType: "recurring" });
+      setSlotModal(false);
+      setToast({ msg: isRecurring ? "Recurring slot added" : "Slot added for " + data.date, type: "success" });
+    } catch {
+      setToast({ msg: "Failed to add slot", type: "error" });
+    }
   });
 
   const handleRemoveSlot = async (slotId: string) => {
     if (!currentUser) return;
     await removeAvailabilitySlot(currentUser.uid, slotId);
     setToast({ msg: "Slot removed", type: "success" });
+  };
+
+  const handleCancelDate = async (slot: AvailabilitySlot, date: string) => {
+    if (!currentUser) return;
+    await cancelRecurringDate(currentUser.uid, slot.id, date);
+    setToast({ msg: `Cancelled ${date}`, type: "success" });
+  };
+
+  const handleUncancelDate = async (slot: AvailabilitySlot, date: string) => {
+    if (!currentUser) return;
+    await uncancelRecurringDate(currentUser.uid, slot.id, date);
+    setToast({ msg: `Restored ${date}`, type: "success" });
+  };
+
+  const handleEditSlot = async () => {
+    if (!editSlotModal || !currentUser || !editStartTime) return;
+    try {
+      const dur = Number(editDuration) as 30 | 45 | 60;
+      await updateAvailabilitySlot(currentUser.uid, editSlotModal.id, {
+        startTime: editStartTime,
+        endTime: addMinutes(editStartTime, dur),
+        duration: dur,
+      });
+      setEditSlotModal(null);
+      setToast({ msg: "Slot updated", type: "success" });
+    } catch {
+      setToast({ msg: "Failed to update slot", type: "error" });
+    }
   };
 
   const handleCancelSession = async () => {
@@ -189,7 +280,17 @@ export default function TutorDashboard() {
   const upcoming  = sessions.filter((s) => s.status === "upcoming");
   const completed = sessions.filter((s) => s.status === "completed");
   const unrated   = completed.filter((s) => !s.tutorRated);
-  const openSlots = slots.filter((s) => !s.booked);
+
+  // Separate slots into recurring and one-off
+  const recurringSlots = slots.filter((s) => s.recurring);
+  const oneOffSlots    = slots.filter((s) => !s.recurring);
+  const today = new Date().toISOString().split("T")[0];
+  const futureOneOff = oneOffSlots.filter((s) => !s.date || s.date >= today);
+  const openSlots = slots.filter((s) => {
+    if (s.recurring) return true; // recurring always "open" conceptually
+    return !s.booked;
+  });
+
   const avgRating = completed.length
     ? (completed.reduce((a, _) => a, 0) / completed.length).toFixed(1)
     : "—";
@@ -220,10 +321,10 @@ export default function TutorDashboard() {
       {/* Stats row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
         {[
-          { icon: Calendar, label: "Upcoming",    val: upcoming.length,      color: "text-brand-600" },
-          { icon: Users,    label: "Completed",   val: completed.length,     color: "text-green-600" },
-          { icon: Clock,    label: "Open Slots",  val: openSlots.length,     color: "text-amber-600" },
-          { icon: Star,     label: "Avg Rating",  val: avgRating,            color: "text-yellow-500" },
+          { icon: Calendar, label: "Upcoming",    val: upcoming.length,  color: "text-brand-600" },
+          { icon: Users,    label: "Completed",   val: completed.length, color: "text-green-600" },
+          { icon: Clock,    label: "Open Slots",  val: openSlots.length, color: "text-amber-600" },
+          { icon: Star,     label: "Avg Rating",  val: avgRating,        color: "text-yellow-500" },
         ].map(({ icon: Icon, label, val, color }) => (
           <div key={label} className="bg-white rounded-lg border border-gray-200 p-4 flex items-center gap-3">
             <div className={`w-9 h-9 rounded-lg bg-gray-50 flex items-center justify-center ${color}`}>
@@ -242,7 +343,7 @@ export default function TutorDashboard() {
         <div className="bg-white rounded-lg border border-gray-200 p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="font-display text-xl text-gray-900">My Availability</h2>
-            <Button size="sm" onClick={() => setSlotModal(true)}>
+            <Button size="sm" onClick={() => { slotForm.reset({ duration: "60", slotType: "recurring" }); setSlotModal(true); }}>
               <PlusCircle className="w-3.5 h-3.5" /> Add Slot
             </Button>
           </div>
@@ -253,43 +354,114 @@ export default function TutorDashboard() {
               <p className="text-sm">No availability set yet. Add your first slot.</p>
             </div>
           ) : (
-            <div className="flex flex-col gap-2">
-              {DAYS_OF_WEEK.map((day) => {
-                const daySlots = slots.filter((s) => s.day === day);
-                if (!daySlots.length) return null;
-                return (
-                  <div key={day}>
-                    <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">{day}</div>
-                    <div className="flex flex-col gap-1.5">
-                      {daySlots.map((slot) => (
-                        <div
-                          key={slot.id}
-                          className={`flex items-center justify-between px-3 py-2 rounded text-sm border ${
-                            slot.booked
-                              ? "bg-brand-50 border-brand-100 text-brand-700"
-                              : "bg-gray-50 border-gray-100 text-gray-700"
-                          }`}
-                        >
-                          <span>{slot.startTime} – {slot.endTime} ({slot.duration} min)</span>
-                          <div className="flex items-center gap-2">
-                            {slot.booked
-                              ? <Badge color="blue">Booked</Badge>
-                              : (
-                                <button
-                                  onClick={() => handleRemoveSlot(slot.id)}
-                                  className="text-gray-300 hover:text-red-500 transition-colors"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              )
-                            }
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+            <div className="flex flex-col gap-4">
+              {/* Recurring Slots */}
+              {recurringSlots.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <Repeat className="w-3.5 h-3.5 text-brand-500" />
+                    <span className="text-xs font-semibold text-brand-600 uppercase tracking-wide">Weekly Recurring</span>
                   </div>
-                );
-              })}
+                  <div className="flex flex-col gap-1.5">
+                    {DAYS_OF_WEEK.map((day) => {
+                      const daySlots = recurringSlots.filter((s) => s.day === day);
+                      if (!daySlots.length) return null;
+                      return daySlots.map((slot) => {
+                        const booked = Object.keys(slot.bookedDates ?? {}).length;
+                        const cancelled = (slot.cancelledDates ?? []).length;
+                        return (
+                          <div
+                            key={slot.id}
+                            className="flex items-center justify-between px-3 py-2 rounded text-sm border bg-brand-50 border-brand-100"
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium text-brand-700">{slot.day}</span>
+                              <span className="text-brand-600">{slot.startTime} – {slot.endTime}</span>
+                              <span className="text-brand-400 text-xs">({slot.duration} min)</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {booked > 0 && <Badge color="blue">{booked} booked</Badge>}
+                              {cancelled > 0 && <Badge color="amber">{cancelled} off</Badge>}
+                              <button
+                                onClick={() => setManageDatesModal(slot)}
+                                className="text-brand-400 hover:text-brand-600 transition-colors"
+                                title="Manage dates"
+                              >
+                                <CalendarDays className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => { setEditSlotModal(slot); setEditStartTime(slot.startTime); setEditDuration(String(slot.duration)); }}
+                                className="text-brand-400 hover:text-brand-600 transition-colors"
+                                title="Edit time"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => handleRemoveSlot(slot.id)}
+                                className="text-gray-300 hover:text-red-500 transition-colors"
+                                title="Delete slot"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      });
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* One-off Slots */}
+              {futureOneOff.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <CalendarDays className="w-3.5 h-3.5 text-green-500" />
+                    <span className="text-xs font-semibold text-green-600 uppercase tracking-wide">Specific Dates</span>
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    {futureOneOff.sort((a, b) => (a.date ?? "").localeCompare(b.date ?? "")).map((slot) => (
+                      <div
+                        key={slot.id}
+                        className={`flex items-center justify-between px-3 py-2 rounded text-sm border ${
+                          slot.booked
+                            ? "bg-blue-50 border-blue-100 text-blue-700"
+                            : "bg-green-50 border-green-100 text-green-700"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">
+                            {slot.date ? format(new Date(slot.date + "T12:00:00"), "EEE, MMM d") : slot.day}
+                          </span>
+                          <span>{slot.startTime} – {slot.endTime}</span>
+                          <span className="text-xs opacity-60">({slot.duration} min)</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {slot.booked ? (
+                            <Badge color="blue">Booked</Badge>
+                          ) : (
+                            <>
+                              <button
+                                onClick={() => { setEditSlotModal(slot); setEditStartTime(slot.startTime); setEditDuration(String(slot.duration)); }}
+                                className="text-green-400 hover:text-green-600 transition-colors"
+                                title="Edit time"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => handleRemoveSlot(slot.id)}
+                                className="text-gray-300 hover:text-red-500 transition-colors"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -376,13 +548,47 @@ export default function TutorDashboard() {
       {/* ── Add Slot Modal ── */}
       <Modal open={slotModal} onClose={() => setSlotModal(false)} title="Add Availability Slot">
         <form onSubmit={handleAddSlot} className="flex flex-col gap-4">
-          <Select
-            label="Day of Week"
-            placeholder="Select day"
-            options={DAYS_OF_WEEK.map((d) => ({ value: d, label: d }))}
-            error={slotForm.formState.errors.day?.message}
-            {...slotForm.register("day")}
-          />
+          {/* Slot type toggle */}
+          <div>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Slot Type</p>
+            <div className="flex gap-2">
+              {(["recurring", "specific"] as const).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => slotForm.setValue("slotType", t)}
+                  className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded border text-sm font-medium transition-colors ${
+                    slotType === t
+                      ? "bg-brand-50 border-brand-300 text-brand-700"
+                      : "bg-white border-gray-200 text-gray-500 hover:border-gray-300"
+                  }`}
+                >
+                  {t === "recurring" ? <Repeat className="w-4 h-4" /> : <CalendarDays className="w-4 h-4" />}
+                  {t === "recurring" ? "Weekly Recurring" : "Specific Date"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Day or Date picker */}
+          {slotType === "recurring" ? (
+            <Select
+              label="Day of Week"
+              placeholder="Select day"
+              options={DAYS_OF_WEEK.map((d) => ({ value: d, label: d }))}
+              error={slotForm.formState.errors.day?.message}
+              {...slotForm.register("day")}
+            />
+          ) : (
+            <Input
+              label="Date"
+              type="date"
+              min={getMinDate()}
+              error={slotForm.formState.errors.day?.message}
+              {...slotForm.register("date")}
+            />
+          )}
+
           <Select
             label="Start Time"
             placeholder="Select time"
@@ -400,12 +606,111 @@ export default function TutorDashboard() {
             error={slotForm.formState.errors.duration?.message}
             {...slotForm.register("duration")}
           />
+
+          {slotType === "recurring" && (
+            <div className="bg-blue-50 border border-blue-100 rounded p-3 text-xs text-blue-700">
+              <Repeat className="w-3 h-3 inline mr-1" />
+              This slot will repeat every week. You can cancel specific dates later.
+            </div>
+          )}
+
           <Divider />
           <div className="flex justify-end gap-2">
             <Button type="button" variant="secondary" onClick={() => setSlotModal(false)}>Cancel</Button>
             <Button type="submit" loading={slotForm.formState.isSubmitting}>Add Slot</Button>
           </div>
         </form>
+      </Modal>
+
+      {/* ── Manage Recurring Dates Modal ── */}
+      <Modal
+        open={!!manageDatesModal}
+        onClose={() => setManageDatesModal(null)}
+        title={`Manage Dates — ${manageDatesModal?.day} ${manageDatesModal?.startTime}–${manageDatesModal?.endTime}`}
+      >
+        {manageDatesModal && (
+          <div className="flex flex-col gap-3">
+            <p className="text-sm text-gray-500">
+              Next 4 weeks of this recurring slot. Toggle dates on/off.
+            </p>
+            <div className="flex flex-col gap-2">
+              {getUpcomingDatesForDay(manageDatesModal.day).map((dateStr) => {
+                const cancelled = (manageDatesModal.cancelledDates ?? []).includes(dateStr);
+                const bookedBy = (manageDatesModal.bookedDates ?? {})[dateStr];
+                return (
+                  <div
+                    key={dateStr}
+                    className={`flex items-center justify-between px-3 py-2.5 rounded border text-sm ${
+                      cancelled
+                        ? "bg-red-50 border-red-100 text-red-600"
+                        : bookedBy
+                        ? "bg-blue-50 border-blue-100 text-blue-700"
+                        : "bg-green-50 border-green-100 text-green-700"
+                    }`}
+                  >
+                    <span className="font-medium">
+                      {format(new Date(dateStr + "T12:00:00"), "EEE, MMM d, yyyy")}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      {bookedBy && <Badge color="blue">Booked</Badge>}
+                      {cancelled ? (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => handleUncancelDate(manageDatesModal, dateStr)}
+                        >
+                          Restore
+                        </Button>
+                      ) : !bookedBy ? (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => handleCancelDate(manageDatesModal, dateStr)}
+                        >
+                          <XIcon className="w-3 h-3" /> Cancel
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* ── Edit Slot Modal ── */}
+      <Modal open={!!editSlotModal} onClose={() => setEditSlotModal(null)} title="Edit Slot Time">
+        {editSlotModal && (
+          <div className="flex flex-col gap-4">
+            <p className="text-sm text-gray-500">
+              {editSlotModal.recurring
+                ? `Recurring: Every ${editSlotModal.day}`
+                : `Date: ${editSlotModal.date ? format(new Date(editSlotModal.date + "T12:00:00"), "EEE, MMM d") : editSlotModal.day}`}
+            </p>
+            <Select
+              label="Start Time"
+              options={TIME_OPTIONS}
+              value={editStartTime}
+              onChange={(e) => setEditStartTime(e.target.value)}
+            />
+            <Select
+              label="Duration"
+              options={[
+                { value: "30", label: "30 minutes" },
+                { value: "45", label: "45 minutes" },
+                { value: "60", label: "60 minutes" },
+              ]}
+              value={editDuration}
+              onChange={(e) => setEditDuration(e.target.value)}
+            />
+            <Divider />
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setEditSlotModal(null)}>Cancel</Button>
+              <Button onClick={handleEditSlot}>Save Changes</Button>
+            </div>
+          </div>
+        )}
       </Modal>
 
       {/* ── Profile Modal ── */}

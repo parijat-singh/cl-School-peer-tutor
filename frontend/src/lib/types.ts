@@ -39,12 +39,18 @@ export interface UserDoc {
 
 export interface AvailabilitySlot {
   id: string;
-  day: DayOfWeek;
-  startTime: string;   // "HH:MM" 24h format
+  recurring: boolean;           // true = repeats every week on `day`
+  day: DayOfWeek;               // always set (derived from `date` for one-off)
+  date?: string;                // "YYYY-MM-DD" — set for one-off slots only
+  startTime: string;            // "HH:MM" 24h format
   endTime: string;
   duration: SessionDuration;
+  // One-off slot booking state
   booked: boolean;
-  bookedBy?: string;   // tuteeUid when booked
+  bookedBy?: string;            // tuteeUid when booked (one-off only)
+  // Recurring slot booking state
+  bookedDates?: Record<string, string>;   // { "YYYY-MM-DD": tuteeUid } for recurring
+  cancelledDates?: string[];              // dates the tutor cancelled for recurring
   schoolDomain: string;
   createdAt: Timestamp;
 }

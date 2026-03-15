@@ -42,6 +42,7 @@ export async function searchTutors(params: {
   schoolDomain: string;
   subject?: string;
   day?: string;
+  date?: string;           // "YYYY-MM-DD" — filter by specific date
 }): Promise<TutorCard[]> {
   const constraints: QueryConstraint[] = [
     where("schoolDomain", "==", params.schoolDomain),
@@ -59,13 +60,45 @@ export async function searchTutors(params: {
   for (const userSnap of snap.docs) {
     const user = { uid: userSnap.id, ...userSnap.data() } as UserDoc;
 
-    // Fetch availability slots
-    const slotConstraints: QueryConstraint[] = [where("booked", "==", false)];
+    // Fetch all availability slots (we filter client-side for complex logic)
+    const slotConstraints: QueryConstraint[] = [];
     if (params.day) slotConstraints.push(where("day", "==", params.day));
     const slotSnap = await getDocs(query(availCol(user.uid), ...slotConstraints));
-    const slots = slotSnap.docs.map(
+    const allSlots = slotSnap.docs.map(
       (s) => ({ id: s.id, ...s.data() } as AvailabilitySlot)
     );
+
+    // Filter to available slots only
+    const today = new Date().toISOString().split("T")[0];
+    const slots = allSlots.filter((slot) => {
+      if (slot.recurring) {
+        // Recurring: has at least one available date in next 4 weeks
+        const cancelled = slot.cancelledDates ?? [];
+        const booked = slot.bookedDates ?? {};
+        // If filtering by specific date, check that date
+        if (params.date) {
+          return !cancelled.includes(params.date) && !booked[params.date];
+        }
+        // Otherwise check if any date in next 4 weeks is available
+        const dayNames = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+        const dayIdx = dayNames.indexOf(slot.day);
+        const now = new Date();
+        for (let w = 0; w < 4; w++) {
+          const d = new Date(now);
+          const diff = (dayIdx - d.getDay() + 7) % 7 || 7;
+          d.setDate(d.getDate() + diff + w * 7);
+          const ds = d.toISOString().split("T")[0];
+          if (!cancelled.includes(ds) && !booked[ds]) return true;
+        }
+        return false;
+      } else {
+        // One-off: not booked and date is in the future
+        if (slot.booked) return false;
+        if (slot.date && slot.date < today) return false;
+        if (params.date && slot.date !== params.date) return false;
+        return true;
+      }
+    });
 
     // Only include tutors with open slots
     if (slots.length > 0) {
@@ -103,12 +136,52 @@ export async function addAvailabilitySlot(
   return addDoc(availCol(tutorUid), {
     ...slot,
     booked: false,
+    bookedDates: slot.recurring ? {} : undefined,
+    cancelledDates: slot.recurring ? [] : undefined,
     createdAt: serverTimestamp(),
   });
 }
 
 export async function removeAvailabilitySlot(tutorUid: string, slotId: string) {
   return deleteDoc(doc(db, "users", tutorUid, "availability", slotId));
+}
+
+export async function updateAvailabilitySlot(
+  tutorUid: string,
+  slotId: string,
+  updates: Partial<Pick<AvailabilitySlot, "startTime" | "endTime" | "duration" | "cancelledDates" | "bookedDates">>
+) {
+  return updateDoc(doc(db, "users", tutorUid, "availability", slotId), updates);
+}
+
+/** Cancel a specific date occurrence of a recurring slot */
+export async function cancelRecurringDate(
+  tutorUid: string,
+  slotId: string,
+  date: string
+) {
+  const slotRef = doc(db, "users", tutorUid, "availability", slotId);
+  const snap = await getDoc(slotRef);
+  if (!snap.exists()) return;
+  const data = snap.data();
+  const cancelled = data.cancelledDates ?? [];
+  if (!cancelled.includes(date)) {
+    await updateDoc(slotRef, { cancelledDates: [...cancelled, date] });
+  }
+}
+
+/** Uncancel a specific date occurrence of a recurring slot */
+export async function uncancelRecurringDate(
+  tutorUid: string,
+  slotId: string,
+  date: string
+) {
+  const slotRef = doc(db, "users", tutorUid, "availability", slotId);
+  const snap = await getDoc(slotRef);
+  if (!snap.exists()) return;
+  const data = snap.data();
+  const cancelled = (data.cancelledDates ?? []).filter((d: string) => d !== date);
+  await updateDoc(slotRef, { cancelledDates: cancelled });
 }
 
 // ── Sessions ─────────────────────────────────────────────────────
