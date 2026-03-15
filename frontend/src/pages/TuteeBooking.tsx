@@ -68,6 +68,43 @@ function getAvailableDates(slot: AvailabilitySlot): string[] {
 
 type SortMode = "recommended" | "rating" | "availability";
 
+/**
+ * Returns DEFAULT_SUBJECTS entries that closely match the user's raw input.
+ * Priority: exact → subject-contains-query → query-contains-subject → word-overlap.
+ */
+function findClosestSubjects(input: string): string[] {
+  const q = input.trim().toLowerCase();
+  if (!q) return [];
+
+  const exact = DEFAULT_SUBJECTS.filter((s) => s.toLowerCase() === q);
+  if (exact.length) return exact;
+
+  // "sat" → "SAT Prep", "calc" → "Calculus" / "Pre-Calculus"
+  const subMatch = DEFAULT_SUBJECTS.filter((s) => s.toLowerCase().includes(q));
+  if (subMatch.length) return subMatch;
+
+  // user typed "calculus ab" → matches "Calculus"
+  const revMatch = DEFAULT_SUBJECTS.filter((s) => q.includes(s.toLowerCase()));
+  if (revMatch.length) return revMatch;
+
+  // word-level overlap: any query word starts-with or is started-by a subject word
+  const qWords = q.split(/\s+/).filter(Boolean);
+  return DEFAULT_SUBJECTS.filter((s) => {
+    const sWords = s.toLowerCase().split(/\s+/);
+    return qWords.some((qw) => sWords.some((sw) => sw.startsWith(qw) || qw.startsWith(sw)));
+  });
+}
+
+/** True if any of a tutor's subjects is a case-insensitive partial match for the query */
+function tutorMatchesSubject(subjects: string[], query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return subjects.some((s) => {
+    const sl = s.toLowerCase();
+    return sl === q || sl.includes(q) || q.includes(sl);
+  });
+}
+
 export default function TuteeBooking() {
   const { currentUser } = useAuth();
   const { school } = useSchool();
@@ -85,6 +122,7 @@ export default function TuteeBooking() {
   const [sortMode, setSortMode] = useState<SortMode>("recommended");
   const [aiLoading, setAiLoading]   = useState(false);
   const [aiPowered, setAiPowered]   = useState(false);
+  const [fuzzyNote, setFuzzyNote]   = useState<string | null>(null);
 
   // Sessions
   const [sessions, setSessions] = useState<SessionDoc[]>([]);
@@ -189,24 +227,80 @@ export default function TuteeBooking() {
     setSearching(true);
     setHasSearched(true);
     setAiPowered(false);
+    setFuzzyNote(null);
 
-    const results = await searchTutors({
+    // ── Stage 1: exact Firestore query ──────────────────────────────
+    let results = await searchTutors({
       schoolDomain: currentUser.schoolDomain!,
       subject: subject || undefined,
       day: day || undefined,
       date: date || undefined,
     });
 
+    let effectiveSubject = subject;
+
+    // ── Stage 2: fuzzy-normalize to DEFAULT_SUBJECTS ─────────────────
+    // If the user typed a subject but got 0 results, map their input to the
+    // closest known subjects (e.g. "Sat" → ["SAT Prep"]) and retry.
+    if (subject && results.length === 0) {
+      const closest = findClosestSubjects(subject);
+
+      if (closest.length > 0) {
+        // Run parallel Firestore queries for all close matches
+        const parallelResults = await Promise.all(
+          closest.map((s) =>
+            searchTutors({
+              schoolDomain: currentUser.schoolDomain!,
+              subject: s,
+              day: day || undefined,
+              date: date || undefined,
+            })
+          )
+        );
+        // Merge, deduplicate by uid
+        const seen = new Set<string>();
+        results = parallelResults.flat().filter((t) => {
+          if (seen.has(t.uid)) return false;
+          seen.add(t.uid);
+          return true;
+        });
+        effectiveSubject = closest[0];
+        if (results.length > 0) {
+          setFuzzyNote(
+            `No exact match for "${subject}" — showing results for: ${closest.join(", ")}`
+          );
+        }
+      }
+
+      // ── Stage 3: full-school client-side fuzzy filter ───────────────
+      // Still 0 results? Fetch every tutor for the school and filter locally
+      // so custom subjects (e.g. "SAT Math", "ACT Prep") are also caught.
+      if (results.length === 0) {
+        const allTutors = await searchTutors({
+          schoolDomain: currentUser.schoolDomain!,
+          day: day || undefined,
+          date: date || undefined,
+        });
+        results = allTutors.filter((t) => tutorMatchesSubject(t.subjects, subject));
+        effectiveSubject = subject;
+        if (results.length > 0) {
+          setFuzzyNote(
+            `No exact match for "${subject}" — showing tutors with related subjects`
+          );
+        }
+      }
+    }
+
     // Set raw results first so user sees something immediately
     setTutors(results);
     setSearching(false);
 
-    // Then run AI recommendation in background (if more than 1 tutor)
+    // ── AI recommendation in background (if more than 1 tutor) ────────
     if (results.length > 1) {
       setAiLoading(true);
       try {
         const rec = await getRecommendedTutors(results, {
-          subject: subject || undefined,
+          subject: effectiveSubject || undefined,
           date: date || undefined,
           day: day || undefined,
         });
@@ -512,7 +606,7 @@ export default function TuteeBooking() {
             </div>
             {(subject || nameFilter || day || date) && (
               <button
-                onClick={() => { setSubject(""); setNameFilter(""); setDay(""); setDate(""); }}
+                onClick={() => { setSubject(""); setNameFilter(""); setDay(""); setDate(""); setFuzzyNote(null); }}
                 className="mt-2 text-xs text-brand-600 hover:text-brand-700"
               >
                 Clear all filters
@@ -539,6 +633,14 @@ export default function TuteeBooking() {
 
           {!searching && sortedTutors.length > 0 && (
             <>
+              {/* Fuzzy / normalised search note */}
+              {fuzzyNote && (
+                <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-xs">
+                  <Search className="w-3.5 h-3.5 flex-shrink-0" />
+                  <span>{fuzzyNote}</span>
+                </div>
+              )}
+
               {/* Sort controls + AI badge */}
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
