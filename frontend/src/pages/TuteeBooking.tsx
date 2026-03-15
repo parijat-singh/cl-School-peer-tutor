@@ -146,6 +146,9 @@ export default function TuteeBooking() {
   const [stars, setStars]       = useState(0);
   const [reviewText, setReviewText] = useState("");
 
+  // Booking in-flight guard
+  const [booking, setBooking] = useState(false);
+
   // Toast
   const [toast, setToast] = useState<{ msg: string; type: "success"|"error" } | null>(null);
 
@@ -347,7 +350,25 @@ export default function TuteeBooking() {
     );
 
   const handleBook = async () => {
-    if (!bookModal || !currentUser || !bookingDate) return;
+    if (!bookModal || !currentUser || !bookingDate || booking) return;
+
+    // ── Duplicate guard ──────────────────────────────────────────────
+    // Reject if the tutee already has an upcoming session with this tutor
+    // on the same date at the same start time.
+    const duplicate = sessions.some((s) => {
+      if (s.status !== "upcoming") return false;
+      if (s.tutorId !== bookModal.tutor.uid) return false;
+      const sDate = s.scheduledDate.toDate().toISOString().split("T")[0];
+      return sDate === bookingDate && s.startTime === bookModal.slot.startTime;
+    });
+    if (duplicate) {
+      setToast({ msg: "You already have this session booked.", type: "error" });
+      setBookModal(null);
+      setBookingDate("");
+      return;
+    }
+
+    setBooking(true);
     try {
       const dateObj = new Date(bookingDate + "T12:00:00");
       const slot = bookModal.slot;
@@ -396,6 +417,8 @@ export default function TuteeBooking() {
       setToast({ msg: "Session booked!", type: "success" });
     } catch (err: unknown) {
       setToast({ msg: (err as Error).message ?? "Booking failed", type: "error" });
+    } finally {
+      setBooking(false);
     }
   };
 
@@ -914,9 +937,22 @@ export default function TuteeBooking() {
       )}
 
       {/* ── Book Modal ── */}
-      <Modal open={!!bookModal} onClose={() => setBookModal(null)} title="Book a Session">
+      <Modal open={!!bookModal} onClose={() => { setBookModal(null); setBookingDate(""); }} title="Book a Session">
         {bookModal && (() => {
-          const availDates = getAvailableDates(bookModal.slot);
+          // Dates the slot has available, minus any already booked by this tutee
+          const alreadyBooked = new Set(
+            sessions
+              .filter(
+                (s) =>
+                  s.status === "upcoming" &&
+                  s.tutorId === bookModal.tutor.uid &&
+                  s.startTime === bookModal.slot.startTime
+              )
+              .map((s) => s.scheduledDate.toDate().toISOString().split("T")[0])
+          );
+          const availDates = getAvailableDates(bookModal.slot).filter(
+            (d) => !alreadyBooked.has(d)
+          );
           return (
             <div className="flex flex-col gap-4">
               <div className="bg-gray-50 rounded p-4 text-sm">
@@ -950,9 +986,13 @@ export default function TuteeBooking() {
                   Select Date
                 </p>
                 {availDates.length === 0 ? (
-                  <p className="text-sm text-red-500">No available dates for this slot.</p>
+                  <p className="text-sm text-red-500">No available dates — you may have already booked this slot.</p>
                 ) : availDates.length === 1 ? (
-                  <div className="px-3 py-2.5 bg-green-50 border border-green-100 rounded text-sm text-green-700 font-medium">
+                  // Auto-select the only available date
+                  <div
+                    className="px-3 py-2.5 bg-green-50 border border-green-100 rounded text-sm text-green-700 font-medium cursor-default"
+                    ref={(el) => { if (el && bookingDate !== availDates[0]) setBookingDate(availDates[0]); }}
+                  >
                     {format(new Date(availDates[0] + "T12:00:00"), "EEEE, MMMM d, yyyy")}
                   </div>
                 ) : (
@@ -987,7 +1027,11 @@ export default function TuteeBooking() {
               <Divider />
               <div className="flex justify-end gap-2">
                 <Button variant="secondary" onClick={() => setBookModal(null)}>Cancel</Button>
-                <Button onClick={handleBook} disabled={!bookingDate || availDates.length === 0}>
+                <Button
+                  onClick={handleBook}
+                  loading={booking}
+                  disabled={booking || !bookingDate || availDates.length === 0}
+                >
                   Confirm Booking
                 </Button>
               </div>
