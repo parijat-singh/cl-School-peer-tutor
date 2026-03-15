@@ -541,4 +541,7 @@ fi
 echo -e "${CYAN}══════════════════════════════════════════════${NC}"
 echo ""
 
+# Reset emulator to original seed state
+bash "${SCRIPT_DIR}/reset-emulator.sh"
+
 exit "$FAIL_COUNT"
