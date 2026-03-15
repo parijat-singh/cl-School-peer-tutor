@@ -1,6 +1,7 @@
 // src/pages/TutorDashboard.tsx
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useAuth } from "@/lib/auth-context";
+import { SchoolBanner } from "@/components/shared/SchoolBanner";
 import {
   subscribeTutorSlots, subscribeUserSessions,
   addAvailabilitySlot, removeAvailabilitySlot,
@@ -297,13 +298,16 @@ export default function TutorDashboard() {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+      {/* School Banner */}
+      <SchoolBanner variant="full" className="mb-4" />
+
       {/* Header */}
       <div className="flex items-start justify-between mb-8">
         <div>
           <h1 className="font-display text-3xl text-gray-900">
             Hey, {currentUser?.name?.split(" ")[0]} 👋
           </h1>
-          <p className="text-gray-500 text-sm mt-1">{currentUser?.schoolDomain} · Tutor Dashboard</p>
+          <p className="text-gray-500 text-sm mt-1">Tutor Dashboard</p>
         </div>
         <Button onClick={() => {
           profileForm.reset({

@@ -9,7 +9,8 @@ import {
   type Unsubscribe,
 } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
-import { db } from "./firebase";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { db, storage } from "./firebase";
 import { fns } from "./firebase";
 import type {
   UserDoc, AvailabilitySlot, SessionDoc, ReviewDoc,
@@ -241,6 +242,23 @@ export function subscribeSchoolReviews(
 export async function getSchoolDoc(domain: string): Promise<SchoolDoc | null> {
   const snap = await getDoc(doc(db, "schools", domain));
   return snap.exists() ? (snap.data() as SchoolDoc) : null;
+}
+
+export async function uploadSchoolLogo(domain: string, file: File): Promise<string> {
+  const ext = file.name.split(".").pop() ?? "png";
+  const storageRef = ref(storage, `schools/${domain}/logo.${ext}`);
+  await uploadBytes(storageRef, file, { contentType: file.type });
+  const url = await getDownloadURL(storageRef);
+  // Update school doc with the new logo URL
+  await updateDoc(doc(db, "schools", domain), { logoUrl: url });
+  return url;
+}
+
+export async function updateSchoolProfile(
+  domain: string,
+  updates: { name?: string; campus?: string; brandColor?: string }
+) {
+  await updateDoc(doc(db, "schools", domain), updates);
 }
 
 // ── Stats ────────────────────────────────────────────────────────

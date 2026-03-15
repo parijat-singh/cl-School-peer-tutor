@@ -4,7 +4,7 @@
     {
       "name": "frontend",
       "runtimeExecutable": "node",
-      "runtimeArgs": ["-e", "const http=require('http');const port=process.env.PORT||3999;http.createServer((req,res)=>{const opts={hostname:'localhost',port:5173,path:req.url,method:req.method,headers:{...req.headers,host:'localhost:5173'}};const p=http.request(opts,pr=>{const h={...pr.headers};h['access-control-allow-origin']='*';res.writeHead(pr.statusCode,h);pr.pipe(res)});req.pipe(p);p.on('error',()=>{res.writeHead(502);res.end()})}).listen(port,()=>console.log('Proxy on '+port))"],
+      "runtimeArgs": ["-e", "process.chdir('frontend'); require('child_process').execFileSync(process.execPath, ['node_modules/vite/bin/vite.js', '--port', '3999', '--host', '0.0.0.0'], {stdio:'inherit'})"],
       "port": 3999
     }
   ]

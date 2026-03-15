@@ -1,6 +1,7 @@
 // src/pages/TeacherHome.tsx
 import { useAuth } from "@/lib/auth-context";
-import { Shield, Clock } from "lucide-react";
+import { SchoolBanner } from "@/components/shared/SchoolBanner";
+import { Clock } from "lucide-react";
 
 export default function TeacherHome() {
   const { currentUser } = useAuth();
@@ -9,9 +10,11 @@ export default function TeacherHome() {
   return (
     <div className="max-w-2xl mx-auto px-4 sm:px-6 py-16 text-center">
       <div className="bg-white rounded-lg border border-gray-200 p-10">
-        <div className="w-14 h-14 rounded-full bg-brand-50 flex items-center justify-center mx-auto mb-5">
-          <Shield className="w-7 h-7 text-brand-500" />
+        {/* School Banner */}
+        <div className="flex justify-center mb-6">
+          <SchoolBanner variant="full" />
         </div>
+
         <h1 className="font-display text-2xl text-gray-900 mb-2">
           Welcome, {currentUser?.name}
         </h1>

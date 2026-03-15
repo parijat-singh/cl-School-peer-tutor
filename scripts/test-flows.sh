@@ -529,6 +529,93 @@ fi
 echo ""
 
 # ══════════════════════════════════════════════════════════════════
+# TEST 10: School branding — update name, campus, brandColor
+# ══════════════════════════════════════════════════════════════════
+echo -e "${CYAN}[T10] School branding — update name, campus, brandColor${NC}"
+
+# Update school branding fields (simulates admin saving branding settings)
+update_doc "schools/lincoln.edu" '{
+  "name": {"stringValue": "Lincoln Academy"},
+  "campus": {"stringValue": "West Campus, 200 Oak Drive"},
+  "brandColor": {"stringValue": "#1E40AF"}
+}' > /dev/null
+
+DOC=$(get_doc "schools/lincoln.edu")
+assert_equals "$(extract_string "$DOC" "name")" "Lincoln Academy" "School name updated to Lincoln Academy"
+assert_equals "$(extract_string "$DOC" "campus")" "West Campus, 200 Oak Drive" "School campus updated"
+assert_equals "$(extract_string "$DOC" "brandColor")" "#1E40AF" "School brandColor updated to #1E40AF"
+
+# Verify unchanged fields survived the PATCH
+assert_equals "$(extract_string "$DOC" "domain")" "lincoln.edu" "Domain unchanged after branding update"
+assert_equals "$(extract_string "$DOC" "status")" "approved" "Status unchanged after branding update"
+assert_equals "$(extract_bool "$DOC" "approved")" "true" "Approved flag unchanged after branding update"
+echo ""
+
+# ══════════════════════════════════════════════════════════════════
+# TEST 11: School branding — logo URL persistence
+# ══════════════════════════════════════════════════════════════════
+echo -e "${CYAN}[T11] School branding — logo URL persistence${NC}"
+
+# Simulate logo upload setting the logoUrl field
+update_doc "schools/lincoln.edu" '{
+  "logoUrl": {"stringValue": "https://storage.example.com/schools/lincoln.edu/logo.png"}
+}' > /dev/null
+
+DOC=$(get_doc "schools/lincoln.edu")
+assert_equals "$(extract_string "$DOC" "logoUrl")" "https://storage.example.com/schools/lincoln.edu/logo.png" "logoUrl persisted on school doc"
+
+# Verify name/campus still intact after adding logo
+assert_equals "$(extract_string "$DOC" "name")" "Lincoln Academy" "School name still intact after logo update"
+assert_equals "$(extract_string "$DOC" "campus")" "West Campus, 200 Oak Drive" "Campus still intact after logo update"
+echo ""
+
+# ══════════════════════════════════════════════════════════════════
+# TEST 12: School branding — new school with full branding
+# ══════════════════════════════════════════════════════════════════
+echo -e "${CYAN}[T12] School branding — new school with full branding${NC}"
+
+create_doc "schools/branded.edu" '{
+  "domain": {"stringValue": "branded.edu"},
+  "name": {"stringValue": "Branded University"},
+  "type": {"stringValue": "university"},
+  "approved": {"booleanValue": true},
+  "status": {"stringValue": "approved"},
+  "brandColor": {"stringValue": "#8B5CF6"},
+  "campus": {"stringValue": "Downtown Campus, 500 Main St"},
+  "logoUrl": {"stringValue": "https://storage.example.com/schools/branded.edu/logo.svg"},
+  "subjects": {"arrayValue": {"values": [{"stringValue": "Computer Science"}, {"stringValue": "Engineering"}]}},
+  "createdAt": {"timestampValue": "'"${NOW}"'"}
+}' > /dev/null
+
+DOC=$(get_doc "schools/branded.edu")
+assert_equals "$(extract_string "$DOC" "name")" "Branded University" "New school name correct"
+assert_equals "$(extract_string "$DOC" "brandColor")" "#8B5CF6" "New school brandColor correct"
+assert_equals "$(extract_string "$DOC" "campus")" "Downtown Campus, 500 Main St" "New school campus correct"
+assert_equals "$(extract_string "$DOC" "logoUrl")" "https://storage.example.com/schools/branded.edu/logo.svg" "New school logoUrl correct"
+assert_equals "$(extract_string "$DOC" "status")" "approved" "New school status approved"
+
+# Clean up
+delete_doc "schools/branded.edu"
+echo ""
+
+# ══════════════════════════════════════════════════════════════════
+# TEST 13: School branding — partial update preserves existing branding
+# ══════════════════════════════════════════════════════════════════
+echo -e "${CYAN}[T13] School branding — partial update preserves existing fields${NC}"
+
+# Only update brandColor — name, campus, logoUrl should survive
+update_doc "schools/lincoln.edu" '{
+  "brandColor": {"stringValue": "#059669"}
+}' > /dev/null
+
+DOC=$(get_doc "schools/lincoln.edu")
+assert_equals "$(extract_string "$DOC" "brandColor")" "#059669" "brandColor updated to green"
+assert_equals "$(extract_string "$DOC" "name")" "Lincoln Academy" "Name preserved during partial update"
+assert_equals "$(extract_string "$DOC" "campus")" "West Campus, 200 Oak Drive" "Campus preserved during partial update"
+assert_equals "$(extract_string "$DOC" "logoUrl")" "https://storage.example.com/schools/lincoln.edu/logo.png" "logoUrl preserved during partial update"
+echo ""
+
+# ══════════════════════════════════════════════════════════════════
 # Summary
 # ══════════════════════════════════════════════════════════════════
 

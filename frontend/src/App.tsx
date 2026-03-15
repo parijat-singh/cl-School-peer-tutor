@@ -2,6 +2,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Suspense, lazy } from "react";
 import { AuthProvider, useAuth } from "@/lib/auth-context";
+import { SchoolProvider } from "@/lib/school-context";
 import { Layout } from "@/components/shared/Layout";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ProtectedRoute } from "@/components/shared/ProtectedRoute";
@@ -124,7 +125,9 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <AppRoutes />
+        <SchoolProvider>
+          <AppRoutes />
+        </SchoolProvider>
       </AuthProvider>
     </BrowserRouter>
   );

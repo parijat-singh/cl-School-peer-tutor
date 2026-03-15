@@ -1,6 +1,8 @@
 // src/pages/TuteeBooking.tsx
 import { useState, useEffect } from "react";
 import { useAuth } from "@/lib/auth-context";
+import { useSchool } from "@/lib/school-context";
+import { SchoolBanner } from "@/components/shared/SchoolBanner";
 import { searchTutors, subscribeUserSessions, getRecommendedTutors } from "@/lib/firestore";
 import {
   Button, Input, Select, Modal, Toast, Badge, StarRating, Divider,
@@ -67,6 +69,7 @@ type SortMode = "recommended" | "rating" | "availability";
 
 export default function TuteeBooking() {
   const { currentUser } = useAuth();
+  const { school } = useSchool();
 
   // Search state
   const [subject, setSubject]   = useState("");
@@ -326,12 +329,15 @@ export default function TuteeBooking() {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+      {/* School Banner */}
+      <SchoolBanner variant="full" className="mb-4" />
+
       {/* Header */}
       <div className="flex items-start justify-between mb-6">
         <div>
           <h1 className="font-display text-3xl text-gray-900">Find a Tutor</h1>
           <p className="text-gray-500 text-sm mt-1">
-            All tutors are from {currentUser?.schoolDomain} and school-verified.
+            All tutors are from {school?.name || currentUser?.schoolDomain} and school-verified.
           </p>
         </div>
         <Button variant="secondary" onClick={() => {

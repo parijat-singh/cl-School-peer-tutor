@@ -1,10 +1,12 @@
 // src/pages/AdminDashboard.tsx
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/lib/auth-context";
+import { useSchool } from "@/lib/school-context";
 import {
   subscribeStats, subscribeSchoolReviews, usersCol, flagReview,
-  getSchoolDoc,
+  getSchoolDoc, uploadSchoolLogo, updateSchoolProfile,
 } from "@/lib/firestore";
+import { SchoolBanner } from "@/components/shared/SchoolBanner";
 // Direct Firestore writes (Cloud Functions don't work in emulator)
 import {
   Button, Input, Select, Modal, Toast, Badge, Divider,
@@ -14,7 +16,8 @@ import { query, where, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, c
 import { db } from "@/lib/firebase";
 import {
   Users, Star, CalendarCheck, AlertTriangle, Shield, Flag,
-  CheckCircle, Ban, Trash2, Download, Palette, UserPlus, UserMinus, UserCheck,
+  CheckCircle, Ban, Trash2, Download, UserPlus, UserMinus, UserCheck,
+  Upload, GraduationCap,
 } from "lucide-react";
 
 const projectId = import.meta.env.VITE_FIREBASE_PROJECT_ID || "peertutor-dev";
@@ -62,7 +65,24 @@ export default function AdminDashboard() {
   const [profileName, setProfileName] = useState("");
 
   // Branding
+  const { school } = useSchool();
   const [brandColor, setBrandColor] = useState("#0055FF");
+  const [schoolName, setSchoolName] = useState("");
+  const [campus, setCampus] = useState("");
+  const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [savingBranding, setSavingBranding] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Sync branding state when school doc loads
+  useEffect(() => {
+    if (school) {
+      setBrandColor(school.brandColor || "#0055FF");
+      setSchoolName(school.name || "");
+      setCampus(school.campus || "");
+      setLogoPreview(school.logoUrl || null);
+    }
+  }, [school]);
 
   // Search / filter
   const [userSearch, setUserSearch] = useState("");
@@ -274,6 +294,9 @@ export default function AdminDashboard() {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+      {/* School Banner */}
+      <SchoolBanner variant="full" className="mb-4" />
+
       {/* Header */}
       <div className="flex items-start justify-between mb-6">
         <div>
@@ -491,15 +514,36 @@ export default function AdminDashboard() {
 
       {/* ── Branding ── */}
       {tab === "branding" && (
-        <div className="max-w-md">
+        <div className="max-w-lg">
           <div className="bg-white border border-gray-200 rounded-lg p-6 flex flex-col gap-5">
             <div>
               <h2 className="font-display text-xl text-gray-900 mb-1">School Branding</h2>
               <p className="text-sm text-gray-500">
-                Customize how PeerTutor looks for your school.
+                Customize how PeerTutor looks for your school. Changes are visible to all students and staff.
               </p>
             </div>
             <Divider />
+
+            {/* School Name */}
+            <Input
+              label="School Name"
+              value={schoolName}
+              onChange={(e) => setSchoolName(e.target.value)}
+              placeholder="Lincoln High School"
+            />
+
+            {/* Campus */}
+            <Input
+              label="Campus / Location"
+              value={campus}
+              onChange={(e) => setCampus(e.target.value)}
+              placeholder="Main Campus, Building A"
+              hint="Shown to students alongside the school name"
+            />
+
+            <Divider />
+
+            {/* Brand Color */}
             <div>
               <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 block">
                 Brand Color
@@ -519,17 +563,133 @@ export default function AdminDashboard() {
                 />
               </div>
             </div>
+
+            <Divider />
+
+            {/* School Logo */}
             <div>
               <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 block">
                 School Logo
               </label>
-              <div className="border-2 border-dashed border-gray-200 rounded-lg p-8 text-center text-gray-400">
-                <Palette className="w-8 h-8 mx-auto mb-2 opacity-40" />
-                <p className="text-sm">Drop a PNG or SVG here</p>
-                <p className="text-xs mt-1">Recommended: 200×60px</p>
+
+              {/* Preview */}
+              {logoPreview ? (
+                <div className="mb-3 flex items-center gap-4 p-4 bg-gray-50 rounded-lg border border-gray-100">
+                  <img
+                    src={logoPreview}
+                    alt="School logo preview"
+                    className="h-16 w-auto object-contain rounded"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-700 truncate">
+                      {logoFile ? logoFile.name : "Current logo"}
+                    </p>
+                    <p className="text-xs text-gray-400">
+                      {logoFile ? `${(logoFile.size / 1024).toFixed(0)} KB` : "Uploaded"}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => { setLogoPreview(school?.logoUrl || null); setLogoFile(null); }}
+                    className="text-gray-400 hover:text-red-500 transition-colors"
+                    title="Remove"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : null}
+
+              {/* Upload zone */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/svg+xml,image/webp"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  if (file.size > 500 * 1024) {
+                    setToast({ msg: "Logo must be under 500 KB", type: "error" });
+                    return;
+                  }
+                  setLogoFile(file);
+                  setLogoPreview(URL.createObjectURL(file));
+                }}
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full border-2 border-dashed border-gray-200 hover:border-brand-300 rounded-lg p-6 text-center text-gray-400 hover:text-brand-500 transition-colors cursor-pointer"
+              >
+                <Upload className="w-8 h-8 mx-auto mb-2 opacity-60" />
+                <p className="text-sm font-medium">Click to upload logo</p>
+                <p className="text-xs mt-1">PNG, JPG, SVG, or WebP. Max 500 KB. Recommended: 200x60px</p>
+              </button>
+            </div>
+
+            {/* Live preview */}
+            <div>
+              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 block">
+                Preview
+              </label>
+              <div className="bg-gray-50 rounded-lg border border-gray-100 p-4 flex items-center gap-3">
+                {logoPreview ? (
+                  <img src={logoPreview} alt="Preview" className="h-10 w-auto object-contain rounded" />
+                ) : (
+                  <div
+                    className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
+                    style={{ backgroundColor: brandColor || "#0055FF" }}
+                  >
+                    <GraduationCap className="w-5 h-5 text-white" />
+                  </div>
+                )}
+                <div>
+                  <p className="font-display text-base text-gray-900">{schoolName || "School Name"}</p>
+                  <p className="text-xs text-gray-500">
+                    {domain}
+                    {campus && <> | {campus}</>}
+                  </p>
+                </div>
               </div>
             </div>
-            <Button className="w-full">Save Branding</Button>
+
+            <Button
+              className="w-full"
+              loading={savingBranding}
+              onClick={async () => {
+                if (!domain) return;
+                setSavingBranding(true);
+                try {
+                  // Upload logo if a new file was selected
+                  if (logoFile) {
+                    await uploadSchoolLogo(domain, logoFile);
+                    setLogoFile(null);
+                  }
+                  // Update school profile fields
+                  await updateSchoolProfile(domain, {
+                    name: schoolName || undefined,
+                    campus: campus || undefined,
+                    brandColor: brandColor || undefined,
+                  });
+                  // Audit log
+                  if (currentUser) {
+                    await addDoc(collection(db, "adminAuditLog"), {
+                      adminUid: currentUser.uid,
+                      action: "update_branding",
+                      targetId: domain,
+                      schoolDomain: domain,
+                      timestamp: serverTimestamp(),
+                    });
+                  }
+                  setToast({ msg: "Branding saved! Changes are live.", type: "success" });
+                } catch (err) {
+                  console.error("Branding save failed:", err);
+                  setToast({ msg: "Failed to save branding", type: "error" });
+                } finally {
+                  setSavingBranding(false);
+                }
+              }}
+            >
+              Save Branding
+            </Button>
           </div>
         </div>
       )}

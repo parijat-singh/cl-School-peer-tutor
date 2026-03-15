@@ -85,6 +85,7 @@ create_doc "schools" "lincoln.edu" '{
   "adminUid": {"stringValue": "user-admin-001"},
   "adminEmail": {"stringValue": "admin@lincoln.edu"},
   "brandColor": {"stringValue": "#1E3A5F"},
+  "campus": {"stringValue": "Main Campus, 1600 Lincoln Ave"},
   "logoUrl": {"stringValue": ""},
   "subjects": {"arrayValue": {"values": [
     {"stringValue": "Algebra"},
