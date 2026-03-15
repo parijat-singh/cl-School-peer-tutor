@@ -3,6 +3,7 @@ import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth-context";
 import { useSchool } from "@/lib/school-context";
 import { useState } from "react";
+import type React from "react";
 import { LogOut, BookOpen, LayoutDashboard, Shield, Search, Menu, X, GraduationCap } from "lucide-react";
 
 export function Layout() {
@@ -16,7 +17,8 @@ export function Layout() {
     navigate("/");
   };
 
-  const navLinks = currentUser
+  type NavLink = { to: string; label: string; Icon: React.ElementType; state?: Record<string, unknown> };
+  const navLinks: NavLink[] = currentUser
     ? currentUser.role === "superadmin"
       ? [{ to: "/superadmin", label: "Super Admin", Icon: Shield }]
       : currentUser.role === "schooladmin"
@@ -24,12 +26,12 @@ export function Layout() {
       : currentUser.role === "teacher"
       ? [{ to: "/teacher", label: "Teacher Home", Icon: LayoutDashboard }]
       : currentUser.role === "tutee"
-      ? [{ to: "/find", label: "Find Tutors", Icon: Search }]
+      ? [{ to: "/find", label: "Find Tutors", Icon: Search, state: { tab: "search" } }]
       : currentUser.role === "tutor"
       ? [{ to: "/dashboard", label: "Dashboard", Icon: LayoutDashboard }]
       : [
           { to: "/dashboard", label: "Tutor Dashboard", Icon: LayoutDashboard },
-          { to: "/find",      label: "Find Tutors",     Icon: Search },
+          { to: "/find",      label: "Find Tutors",     Icon: Search, state: { tab: "search" } },
         ]
     : [];
 
@@ -66,10 +68,11 @@ export function Layout() {
 
             {/* Desktop links */}
             <div className="hidden md:flex items-center gap-1">
-              {navLinks.map(({ to, label, Icon }) => (
+              {navLinks.map(({ to, label, Icon, state }) => (
                 <NavLink
                   key={to}
                   to={to}
+                  state={state}
                   className={({ isActive }) =>
                     `flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium transition-colors ${
                       isActive
@@ -136,10 +139,11 @@ export function Layout() {
         {/* Mobile nav */}
         {mobileOpen && (
           <div className="md:hidden border-t border-gray-100 px-4 py-3 flex flex-col gap-1">
-            {navLinks.map(({ to, label, Icon }) => (
+            {navLinks.map(({ to, label, Icon, state }) => (
               <NavLink
                 key={to}
                 to={to}
+                state={state}
                 onClick={() => setMobileOpen(false)}
                 className={({ isActive }) =>
                   `flex items-center gap-2 px-3 py-2 rounded text-sm font-medium ${

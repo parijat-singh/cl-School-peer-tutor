@@ -1,5 +1,6 @@
 // src/pages/TuteeBooking.tsx
 import { useState, useEffect, useMemo, useCallback } from "react";
+import { useLocation } from "react-router-dom";
 import { useAuth } from "@/lib/auth-context";
 import { useSchool } from "@/lib/school-context";
 import { SchoolBanner } from "@/components/shared/SchoolBanner";
@@ -127,6 +128,15 @@ export default function TuteeBooking() {
   // Sessions
   const [sessions, setSessions] = useState<SessionDoc[]>([]);
   const [tab, setTab]           = useState<"search" | "sessions" | "calendar">("search");
+
+  // Switch to the tab specified in nav-link location state (e.g. Find Tutors → search)
+  const location = useLocation();
+  useEffect(() => {
+    const locState = location.state as { tab?: string } | null;
+    if (locState?.tab === "search" || locState?.tab === "calendar" || locState?.tab === "sessions") {
+      setTab(locState.tab);
+    }
+  }, [location.key]); // location.key changes on every navigation, even same-path
 
   // Calendar state
   const [calYear,  setCalYear]  = useState(() => new Date().getFullYear());
@@ -800,11 +810,20 @@ export default function TuteeBooking() {
                           <span className="font-medium">{s.tutorName}</span>
                           <Badge color="blue">{s.subject}</Badge>
                           <span className="text-xs opacity-60">{s.startTime}–{s.endTime}</span>
-                          {s.meetLink && (
-                            <a href={s.meetLink} target="_blank" rel="noopener noreferrer" className="ml-auto">
-                              <Button size="sm"><Video className="w-3 h-3" /> Join</Button>
-                            </a>
-                          )}
+                          {s.meetLink && (() => {
+                            const base = s.scheduledDate.toDate();
+                            const [sh, sm2] = (s.startTime ?? "00:00").split(":").map(Number);
+                            const [eh, em2] = (s.endTime   ?? "00:00").split(":").map(Number);
+                            const startMs = new Date(base.getFullYear(), base.getMonth(), base.getDate(), sh, sm2).getTime();
+                            const endMs   = new Date(base.getFullYear(), base.getMonth(), base.getDate(), eh, em2).getTime();
+                            const n = Date.now();
+                            const joinable = n >= startMs - 15 * 60 * 1000 && n <= endMs + 5 * 60 * 1000;
+                            return joinable ? (
+                              <a href={s.meetLink} target="_blank" rel="noopener noreferrer" className="ml-auto">
+                                <Button size="sm"><Video className="w-3 h-3" /> Join</Button>
+                              </a>
+                            ) : null;
+                          })()}
                         </div>
                       ))}
                     </div>
@@ -900,8 +919,11 @@ export default function TuteeBooking() {
           <div>
             <h2 className="font-display text-xl text-gray-900 mb-3">Upcoming</h2>
             {upcoming.length === 0 ? (
-              <div className="bg-white border border-gray-100 rounded-lg p-8 text-center text-gray-400">
-                <p className="text-sm">No upcoming sessions. Go find a tutor!</p>
+              <div className="bg-white border border-gray-100 rounded-lg p-8 text-center text-gray-400 flex flex-col items-center gap-3">
+                <p className="text-sm">No upcoming sessions.</p>
+                <Button variant="secondary" onClick={() => setTab("search")}>
+                  <Search className="w-4 h-4" /> Find a Tutor
+                </Button>
               </div>
             ) : (
               <div className="flex flex-col gap-3">
@@ -1239,6 +1261,34 @@ function SessionRow({
   const other = role === "tutee" ? session.tutorName : session.tuteeName;
   const isUpcoming = session.status === "upcoming";
 
+  // Re-evaluate every 30 s so the Join button appears automatically
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Show Join only within 15 mins before start and up to 5 mins after end
+  const canJoin = useMemo(() => {
+    if (!session.meetLink || !isUpcoming) return false;
+    const base = session.scheduledDate.toDate();
+    const [sh, sm] = (session.startTime ?? "00:00").split(":").map(Number);
+    const [eh, em] = (session.endTime   ?? "00:00").split(":").map(Number);
+    const startMs = new Date(base.getFullYear(), base.getMonth(), base.getDate(), sh, sm).getTime();
+    const endMs   = new Date(base.getFullYear(), base.getMonth(), base.getDate(), eh, em).getTime();
+    return now >= startMs - 15 * 60 * 1000 && now <= endMs + 5 * 60 * 1000;
+  }, [now, session, isUpcoming]);
+
+  // How many minutes until the Join window opens (for tooltip / disabled hint)
+  const minsUntilJoin = useMemo(() => {
+    if (!session.meetLink || !isUpcoming) return null;
+    const base = session.scheduledDate.toDate();
+    const [sh, sm] = (session.startTime ?? "00:00").split(":").map(Number);
+    const startMs = new Date(base.getFullYear(), base.getMonth(), base.getDate(), sh, sm).getTime();
+    const diff = Math.ceil((startMs - 15 * 60 * 1000 - now) / 60_000);
+    return diff > 0 ? diff : null;
+  }, [now, session, isUpcoming]);
+
   return (
     <div className="bg-white border border-gray-100 rounded-lg p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
       <div>
@@ -1260,13 +1310,17 @@ function SessionRow({
           <Badge color="blue">{session.subject}</Badge>
         </div>
       </div>
-      <div className="flex gap-2">
+      <div className="flex items-center gap-2">
         {isUpcoming && session.meetLink && (
-          <a href={session.meetLink} target="_blank" rel="noopener noreferrer">
-            <Button size="sm">
-              <Video className="w-3 h-3" /> Join
-            </Button>
-          </a>
+          canJoin ? (
+            <a href={session.meetLink} target="_blank" rel="noopener noreferrer">
+              <Button size="sm"><Video className="w-3 h-3" /> Join</Button>
+            </a>
+          ) : minsUntilJoin !== null ? (
+            <span className="text-xs text-gray-400 whitespace-nowrap">
+              Join in {minsUntilJoin} min
+            </span>
+          ) : null
         )}
         {isUpcoming && onCancel && (
           <Button size="sm" variant="ghost" onClick={onCancel}>Cancel</Button>
