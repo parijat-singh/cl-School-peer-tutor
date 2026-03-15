@@ -184,3 +184,19 @@ export function subscribeStats(
 export async function flagReview(reviewId: string, flaggedBy: string) {
   return updateDoc(doc(db, "reviews", reviewId), { flagged: true, flaggedBy });
 }
+
+// ── Super Admin queries ──────────────────────────────────────────
+
+export function subscribeAllSchools(cb: (schools: SchoolDoc[]) => void): Unsubscribe {
+  const q = query(schoolsCol(), orderBy("domain"));
+  return onSnapshot(q, (snap) => {
+    cb(snap.docs.map((d) => d.data() as SchoolDoc));
+  });
+}
+
+export function subscribeAllSuperAdmins(cb: (users: UserDoc[]) => void): Unsubscribe {
+  const q = query(usersCol(), where("role", "==", "superadmin"));
+  return onSnapshot(q, (snap) => {
+    cb(snap.docs.map((d) => ({ uid: d.id, ...d.data() } as UserDoc)));
+  });
+}

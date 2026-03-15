@@ -4,16 +4,28 @@ import { useAuth } from "@/lib/auth-context";
 import {
   subscribeTutorSlots, subscribeUserSessions,
   addAvailabilitySlot, removeAvailabilitySlot,
+  getUserDoc,
 } from "@/lib/firestore";
-import { cancelSession, updateTutorProfile } from "@/lib/functions";
 import {
   Button, Input, Select, Textarea, Modal, Toast, Badge, StarRating, Divider,
 } from "@/components/shared/ui";
+import { doc, updateDoc, addDoc, collection, serverTimestamp } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import type { AvailabilitySlot, SessionDoc } from "@/lib/types";
+import type { AvailabilitySlot, SessionDoc, GradeLevel } from "@/lib/types";
 import { DAYS_OF_WEEK } from "@/lib/types";
+
+const GRADES: { value: GradeLevel; label: string }[] = [
+  { value: "6th",  label: "6th Grade"  },
+  { value: "7th",  label: "7th Grade"  },
+  { value: "8th",  label: "8th Grade"  },
+  { value: "9th",  label: "9th Grade"  },
+  { value: "10th", label: "10th Grade" },
+  { value: "11th", label: "11th Grade" },
+  { value: "12th", label: "12th Grade" },
+];
 import { PlusCircle, Trash2, Video, Clock, BookOpen, Star, Users, Calendar } from "lucide-react";
 import { format } from "date-fns";
 
@@ -31,6 +43,8 @@ const slotSchema = z.object({
 });
 
 const profileSchema = z.object({
+  name:     z.string().min(2, "Name must be at least 2 characters"),
+  grade:    z.string().optional(),
   subjects: z.array(z.string()).min(1, "Select at least one subject"),
   bio:      z.string().max(280, "Max 280 characters"),
 });
@@ -63,6 +77,9 @@ export default function TutorDashboard() {
   const [slotModal, setSlotModal]       = useState(false);
   const [profileModal, setProfileModal] = useState(false);
   const [cancelModal, setCancelModal]   = useState<SessionDoc | null>(null);
+  const [rateModal, setRateModal]       = useState<SessionDoc | null>(null);
+  const [stars, setStars]               = useState(0);
+  const [reviewText, setReviewText]     = useState("");
   const [selectedSubjects, setSelectedSubjects] = useState<string[]>([]);
 
   const slotForm = useForm<SlotForm>({ resolver: zodResolver(slotSchema), defaultValues: { duration: "60" } });
@@ -98,10 +115,21 @@ export default function TutorDashboard() {
   };
 
   const handleCancelSession = async () => {
-    if (!cancelModal) return;
+    if (!cancelModal || !currentUser) return;
     try {
-      await cancelSession({ sessionId: cancelModal.id });
-      setToast({ msg: "Session cancelled — tutee notified", type: "success" });
+      await updateDoc(doc(db, "sessions", cancelModal.id), {
+        status: "cancelled",
+        cancelledAt: serverTimestamp(),
+        cancelledBy: currentUser.uid,
+      });
+      // Free the slot
+      if (cancelModal.slotId) {
+        await updateDoc(doc(db, "users", cancelModal.tutorId, "availability", cancelModal.slotId), {
+          booked: false,
+          bookedBy: null,
+        });
+      }
+      setToast({ msg: "Session cancelled", type: "success" });
     } catch {
       setToast({ msg: "Failed to cancel session", type: "error" });
     }
@@ -109,14 +137,48 @@ export default function TutorDashboard() {
   };
 
   const handleSaveProfile = profileForm.handleSubmit(async (data) => {
+    if (!currentUser) return;
     try {
-      await updateTutorProfile({ subjects: data.subjects, bio: data.bio });
+      await updateDoc(doc(db, "users", currentUser.uid), {
+        name: data.name,
+        grade: data.grade || null,
+        subjects: data.subjects,
+        bio: data.bio,
+        updatedAt: serverTimestamp(),
+      });
       setToast({ msg: "Profile updated", type: "success" });
       setProfileModal(false);
     } catch {
       setToast({ msg: "Update failed", type: "error" });
     }
   });
+
+  const handleRateSession = async () => {
+    if (!rateModal || stars === 0 || !currentUser) return;
+    try {
+      await addDoc(collection(db, "reviews"), {
+        sessionId: rateModal.id,
+        authorId: currentUser.uid,
+        authorName: currentUser.name,
+        targetId: rateModal.tuteeId,
+        targetName: rateModal.tuteeName,
+        stars: stars as 1 | 2 | 3 | 4 | 5,
+        text: reviewText || null,
+        flagged: false,
+        schoolDomain: currentUser.schoolDomain,
+        createdAt: serverTimestamp(),
+      });
+      await updateDoc(doc(db, "sessions", rateModal.id), {
+        tutorRated: true,
+      });
+      setRateModal(null);
+      setStars(0);
+      setReviewText("");
+      setToast({ msg: "Rating submitted", type: "success" });
+    } catch {
+      setToast({ msg: "Failed to submit rating", type: "error" });
+    }
+  };
 
   const toggleSubject = useCallback((s: string) => {
     setSelectedSubjects((prev) =>
@@ -126,6 +188,7 @@ export default function TutorDashboard() {
 
   const upcoming  = sessions.filter((s) => s.status === "upcoming");
   const completed = sessions.filter((s) => s.status === "completed");
+  const unrated   = completed.filter((s) => !s.tutorRated);
   const openSlots = slots.filter((s) => !s.booked);
   const avgRating = completed.length
     ? (completed.reduce((a, _) => a, 0) / completed.length).toFixed(1)
@@ -141,7 +204,15 @@ export default function TutorDashboard() {
           </h1>
           <p className="text-gray-500 text-sm mt-1">{currentUser?.schoolDomain} · Tutor Dashboard</p>
         </div>
-        <Button onClick={() => setProfileModal(true)} variant="secondary">
+        <Button onClick={() => {
+          profileForm.reset({
+            name: currentUser?.name ?? "",
+            grade: currentUser?.grade ?? "",
+            subjects: [],
+            bio: "",
+          });
+          setProfileModal(true);
+        }} variant="secondary">
           <BookOpen className="w-4 h-4" /> Edit Profile
         </Button>
       </div>
@@ -282,11 +353,20 @@ export default function TutorDashboard() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {completed.map((session) => (
               <div key={session.id} className="border border-gray-100 rounded p-3 text-sm">
-                <p className="font-medium text-gray-800">{session.tuteeName}</p>
-                <p className="text-xs text-gray-500 mb-1">{session.subject} · {session.duration} min</p>
-                <p className="text-xs text-gray-400">
-                  {format(session.scheduledDate.toDate(), "MMM d, yyyy")}
-                </p>
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="font-medium text-gray-800">{session.tuteeName}</p>
+                    <p className="text-xs text-gray-500 mb-1">{session.subject} · {session.duration} min</p>
+                    <p className="text-xs text-gray-400">
+                      {format(session.scheduledDate.toDate(), "MMM d, yyyy")}
+                    </p>
+                  </div>
+                  {!session.tutorRated && (
+                    <Button size="sm" variant="secondary" onClick={() => { setRateModal(session); setStars(0); setReviewText(""); }}>
+                      <Star className="w-3 h-3" /> Rate
+                    </Button>
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -329,8 +409,18 @@ export default function TutorDashboard() {
       </Modal>
 
       {/* ── Profile Modal ── */}
-      <Modal open={profileModal} onClose={() => setProfileModal(false)} title="Edit Tutor Profile">
+      <Modal open={profileModal} onClose={() => setProfileModal(false)} title="Edit Profile">
         <form onSubmit={handleSaveProfile} className="flex flex-col gap-4">
+          <Input
+            label="Name"
+            error={profileForm.formState.errors.name?.message}
+            {...profileForm.register("name")}
+          />
+          <Select
+            label="Grade"
+            options={GRADES}
+            {...profileForm.register("grade")}
+          />
           <div>
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Subjects</p>
             <div className="flex flex-wrap gap-2">
@@ -377,6 +467,36 @@ export default function TutorDashboard() {
           <Button variant="secondary" onClick={() => setCancelModal(null)}>Keep Session</Button>
           <Button variant="danger" onClick={handleCancelSession}>Yes, Cancel</Button>
         </div>
+      </Modal>
+
+      {/* ── Rate Session Modal ── */}
+      <Modal open={!!rateModal} onClose={() => setRateModal(null)} title="Rate Your Tutee">
+        {rateModal && (
+          <div className="flex flex-col gap-4">
+            <p className="text-sm text-gray-600">
+              How was your session with <strong>{rateModal.tuteeName}</strong>?
+            </p>
+            <div className="flex flex-col items-center gap-2 py-4">
+              <StarRating value={stars} onChange={setStars} size="lg" />
+              {stars > 0 && (
+                <p className="text-xs text-gray-500">
+                  {["", "Poor", "Fair", "Good", "Very Good", "Excellent"][stars]}
+                </p>
+              )}
+            </div>
+            <textarea
+              value={reviewText}
+              onChange={(e) => setReviewText(e.target.value)}
+              placeholder="Write a review (optional)…"
+              className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded resize-none min-h-[80px] focus:outline-none focus:ring-2 focus:ring-brand-500"
+            />
+            <Divider />
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setRateModal(null)}>Skip</Button>
+              <Button onClick={handleRateSession} disabled={stars === 0}>Submit Rating</Button>
+            </div>
+          </div>
+        )}
       </Modal>
 
       {/* Toast */}

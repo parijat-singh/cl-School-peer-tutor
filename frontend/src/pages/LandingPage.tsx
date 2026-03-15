@@ -59,7 +59,7 @@ export default function LandingPage() {
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {[
-              { Icon: Shield,   title: "School-Verified Auth",  body: "Every user authenticates with their school email. Zero cross-school data leakage. FERPA & COPPA compliant." },
+              { Icon: Shield,   title: "School-Verified Auth",  body: "Every user authenticates with their school email. Zero cross-school data leakage. FERPA compliant." },
               { Icon: Zap,      title: "Instant Booking",       body: "Atomic transactions prevent double-booking. Book a tutor slot in 3 clicks. No back-and-forth emails." },
               { Icon: Calendar, title: "Auto-Scheduled",        body: "Google Meet link and calendar invite sent within 30 seconds of every confirmed booking." },
               { Icon: Star,     title: "Bidirectional Ratings", body: "Both tutor and tutee rate each session. Aggregate scores surface quality automatically." },

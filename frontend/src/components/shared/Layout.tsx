@@ -15,8 +15,12 @@ export function Layout() {
   };
 
   const navLinks = currentUser
-    ? currentUser.role === "admin"
+    ? currentUser.role === "superadmin"
+      ? [{ to: "/superadmin", label: "Super Admin", Icon: Shield }]
+      : currentUser.role === "schooladmin"
       ? [{ to: "/admin", label: "Admin Panel", Icon: Shield }]
+      : currentUser.role === "teacher"
+      ? [{ to: "/teacher", label: "Teacher Home", Icon: LayoutDashboard }]
       : currentUser.role === "tutee"
       ? [{ to: "/find", label: "Find Tutors", Icon: Search }]
       : currentUser.role === "tutor"

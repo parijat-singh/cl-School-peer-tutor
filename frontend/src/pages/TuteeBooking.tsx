@@ -2,12 +2,24 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { searchTutors, subscribeUserSessions } from "@/lib/firestore";
-import { bookSession, cancelSession, submitRating } from "@/lib/functions";
 import {
-  Button, Select, Modal, Toast, Badge, StarRating, Divider,
+  Button, Input, Select, Modal, Toast, Badge, StarRating, Divider,
 } from "@/components/shared/ui";
-import type { TutorCard, AvailabilitySlot, SessionDoc } from "@/lib/types";
+import type { TutorCard, AvailabilitySlot, SessionDoc, GradeLevel } from "@/lib/types";
 import { DAYS_OF_WEEK } from "@/lib/types";
+import { doc, updateDoc, addDoc, collection, serverTimestamp, Timestamp } from "firebase/firestore";
+import { db } from "@/lib/firebase";
+import { getUserDoc } from "@/lib/firestore";
+
+const GRADES: { value: GradeLevel; label: string }[] = [
+  { value: "6th",  label: "6th Grade"  },
+  { value: "7th",  label: "7th Grade"  },
+  { value: "8th",  label: "8th Grade"  },
+  { value: "9th",  label: "9th Grade"  },
+  { value: "10th", label: "10th Grade" },
+  { value: "11th", label: "11th Grade" },
+  { value: "12th", label: "12th Grade" },
+];
 import {
   Search, Star, Clock, Video, Calendar, ChevronRight, Filter, User,
 } from "lucide-react";
@@ -70,35 +82,62 @@ export default function TuteeBooking() {
     try {
       // Find the next occurrence of the day
       const today = new Date();
-      const dayIndex = DAYS_OF_WEEK.indexOf(bookModal.slot.day as (typeof DAYS_OF_WEEK)[number]);
+      const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+      const dayIndex = dayNames.indexOf(bookModal.slot.day);
       const diff = (dayIndex - today.getDay() + 7) % 7 || 7;
       const date = new Date(today);
       date.setDate(today.getDate() + diff);
 
-      const result = await bookSession({
-        tutorId:       bookModal.tutor.uid,
-        slotId:        bookModal.slot.id,
-        subject:       bookingSubject || bookModal.tutor.subjects[0],
-        scheduledDate: date.toISOString(),
+      // Mark slot as booked
+      await updateDoc(doc(db, "users", bookModal.tutor.uid, "availability", bookModal.slot.id), {
+        booked: true,
+        bookedBy: currentUser.uid,
+      });
+
+      // Create session doc
+      await addDoc(collection(db, "sessions"), {
+        tutorId: bookModal.tutor.uid,
+        tuteeId: currentUser.uid,
+        tutorName: bookModal.tutor.name,
+        tuteeName: currentUser.name,
+        subject: bookingSubject || bookModal.tutor.subjects[0],
+        slotId: bookModal.slot.id,
+        day: bookModal.slot.day,
+        startTime: bookModal.slot.startTime,
+        endTime: bookModal.slot.endTime,
+        duration: bookModal.slot.duration,
+        scheduledDate: Timestamp.fromDate(date),
+        status: "upcoming",
+        meetLinkStatus: "pending",
+        schoolDomain: currentUser.schoolDomain,
+        createdAt: serverTimestamp(),
+        tutorRated: false,
+        tuteeRated: false,
       });
 
       setBookModal(null);
       setTab("sessions");
-      setToast({
-        msg: result.data.meetLinkStatus === "ready"
-          ? "Session booked! Google Meet link sent to your email."
-          : "Session booked! Meet link will be emailed shortly.",
-        type: "success",
-      });
+      setToast({ msg: "Session booked!", type: "success" });
     } catch (err: unknown) {
       setToast({ msg: (err as Error).message ?? "Booking failed", type: "error" });
     }
   };
 
   const handleCancel = async () => {
-    if (!cancelModal) return;
+    if (!cancelModal || !currentUser) return;
     try {
-      await cancelSession({ sessionId: cancelModal.id });
+      await updateDoc(doc(db, "sessions", cancelModal.id), {
+        status: "cancelled",
+        cancelledAt: serverTimestamp(),
+        cancelledBy: currentUser.uid,
+      });
+      // Free the slot
+      if (cancelModal.slotId) {
+        await updateDoc(doc(db, "users", cancelModal.tutorId, "availability", cancelModal.slotId), {
+          booked: false,
+          bookedBy: null,
+        });
+      }
       setToast({ msg: "Session cancelled", type: "success" });
     } catch {
       setToast({ msg: "Cancel failed", type: "error" });
@@ -107,15 +146,66 @@ export default function TuteeBooking() {
   };
 
   const handleRate = async () => {
-    if (!rateModal || stars === 0) return;
+    if (!rateModal || stars === 0 || !currentUser) return;
     try {
-      await submitRating({ sessionId: rateModal.id, stars: stars as 1|2|3|4|5, text: reviewText });
+      // Create review doc
+      await addDoc(collection(db, "reviews"), {
+        sessionId: rateModal.id,
+        authorId: currentUser.uid,
+        authorName: currentUser.name,
+        targetId: rateModal.tutorId,
+        targetName: rateModal.tutorName,
+        stars: stars as 1 | 2 | 3 | 4 | 5,
+        text: reviewText || null,
+        flagged: false,
+        schoolDomain: currentUser.schoolDomain,
+        createdAt: serverTimestamp(),
+      });
+
+      // Mark session as rated by tutee
+      await updateDoc(doc(db, "sessions", rateModal.id), {
+        tuteeRated: true,
+      });
+
+      // Update tutor's avgRating and reviewCount
+      const tutorDoc = await getUserDoc(rateModal.tutorId);
+      if (tutorDoc) {
+        const oldCount = tutorDoc.reviewCount ?? 0;
+        const oldAvg = tutorDoc.avgRating ?? 0;
+        const newCount = oldCount + 1;
+        const newAvg = (oldAvg * oldCount + stars) / newCount;
+        await updateDoc(doc(db, "users", rateModal.tutorId), {
+          avgRating: Math.round(newAvg * 10) / 10,
+          reviewCount: newCount,
+        });
+      }
+
       setRateModal(null);
       setStars(0);
       setReviewText("");
       setToast({ msg: "Rating submitted — thanks!", type: "success" });
     } catch {
       setToast({ msg: "Failed to submit rating", type: "error" });
+    }
+  };
+
+  // Profile editing
+  const [profileModal, setProfileModal] = useState(false);
+  const [profileName, setProfileName] = useState("");
+  const [profileGrade, setProfileGrade] = useState("");
+
+  const handleSaveProfile = async () => {
+    if (!currentUser || !profileName) return;
+    try {
+      await updateDoc(doc(db, "users", currentUser.uid), {
+        name: profileName,
+        grade: profileGrade || null,
+        updatedAt: serverTimestamp(),
+      });
+      setToast({ msg: "Profile updated", type: "success" });
+      setProfileModal(false);
+    } catch {
+      setToast({ msg: "Update failed", type: "error" });
     }
   };
 
@@ -126,11 +216,20 @@ export default function TuteeBooking() {
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
       {/* Header */}
-      <div className="mb-6">
-        <h1 className="font-display text-3xl text-gray-900">Find a Tutor</h1>
-        <p className="text-gray-500 text-sm mt-1">
-          All tutors are from {currentUser?.schoolDomain} and school-verified.
-        </p>
+      <div className="flex items-start justify-between mb-6">
+        <div>
+          <h1 className="font-display text-3xl text-gray-900">Find a Tutor</h1>
+          <p className="text-gray-500 text-sm mt-1">
+            All tutors are from {currentUser?.schoolDomain} and school-verified.
+          </p>
+        </div>
+        <Button variant="secondary" onClick={() => {
+          setProfileName(currentUser?.name ?? "");
+          setProfileGrade(currentUser?.grade ?? "");
+          setProfileModal(true);
+        }}>
+          <User className="w-4 h-4" /> Edit Profile
+        </Button>
       </div>
 
       {/* Tab toggle */}
@@ -347,6 +446,28 @@ export default function TuteeBooking() {
         <div className="flex justify-end gap-2">
           <Button variant="secondary" onClick={() => setCancelModal(null)}>Keep It</Button>
           <Button variant="danger" onClick={handleCancel}>Yes, Cancel</Button>
+        </div>
+      </Modal>
+
+      {/* ── Profile Modal ── */}
+      <Modal open={profileModal} onClose={() => setProfileModal(false)} title="Edit Profile">
+        <div className="flex flex-col gap-4">
+          <Input
+            label="Name"
+            value={profileName}
+            onChange={(e) => setProfileName(e.target.value)}
+          />
+          <Select
+            label="Grade"
+            options={GRADES}
+            value={profileGrade}
+            onChange={(e) => setProfileGrade(e.target.value)}
+          />
+          <Divider />
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setProfileModal(false)}>Cancel</Button>
+            <Button onClick={handleSaveProfile} disabled={!profileName}>Save Profile</Button>
+          </div>
         </div>
       </Modal>
 

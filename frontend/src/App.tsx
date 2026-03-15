@@ -15,6 +15,8 @@ const TutorProfile    = lazy(() => import("@/pages/TutorProfile"));
 const AdminDashboard  = lazy(() => import("@/pages/AdminDashboard"));
 const RateSession     = lazy(() => import("@/pages/RateSession"));
 const OnboardRole     = lazy(() => import("@/pages/OnboardRole"));
+const SuperAdminDashboard = lazy(() => import("@/pages/SuperAdminDashboard"));
+const TeacherHome     = lazy(() => import("@/pages/TeacherHome"));
 const NotFound        = lazy(() => import("@/pages/NotFound"));
 
 function AppRoutes() {
@@ -81,30 +83,33 @@ function AppRoutes() {
             }
           />
 
-          {/* Admin */}
+          {/* School Admin */}
           <Route
             path="admin"
             element={
-              <ProtectedRoute roles={["admin"]}>
+              <ProtectedRoute roles={["schooladmin"]}>
                 <AdminDashboard />
               </ProtectedRoute>
             }
           />
 
-          {/* Convenience redirect */}
+          {/* Super Admin */}
           <Route
-            path="dashboard"
+            path="superadmin"
             element={
-              <Navigate
-                to={
-                  currentUser?.role === "admin"
-                    ? "/admin"
-                    : currentUser?.role === "tutee"
-                    ? "/find"
-                    : "/dashboard"
-                }
-                replace
-              />
+              <ProtectedRoute roles={["superadmin"]}>
+                <SuperAdminDashboard />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Teacher */}
+          <Route
+            path="teacher"
+            element={
+              <ProtectedRoute roles={["teacher"]}>
+                <TeacherHome />
+              </ProtectedRoute>
             }
           />
 

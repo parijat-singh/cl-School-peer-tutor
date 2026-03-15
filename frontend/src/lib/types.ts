@@ -5,10 +5,10 @@ import type { Timestamp } from "firebase/firestore";
 
 // ── Enums ────────────────────────────────────────────────────────
 
-export type UserRole = "tutor" | "tutee" | "both" | "admin";
+export type UserRole = "tutor" | "tutee" | "both" | "teacher" | "schooladmin" | "superadmin";
 export type GradeLevel = "6th" | "7th" | "8th" | "9th" | "10th" | "11th" | "12th";
 export type SessionStatus = "upcoming" | "completed" | "cancelled";
-export type AccountStatus = "active" | "pending_consent" | "suspended";
+export type AccountStatus = "active" | "pending" | "suspended";
 export type SessionDuration = 30 | 45 | 60;
 
 export const DAYS_OF_WEEK = [
@@ -22,9 +22,9 @@ export interface UserDoc {
   uid: string;
   name: string;
   email: string;
-  grade: GradeLevel;
+  grade: GradeLevel | null;
   role: UserRole;
-  schoolDomain: string;
+  schoolDomain: string | null;
   status: AccountStatus;
   suspendedUntil?: Timestamp | null;
   createdAt: Timestamp;
@@ -89,12 +89,19 @@ export interface ReviewDoc {
   createdAt: Timestamp;
 }
 
+export type SchoolStatus = "pending" | "approved" | "rejected";
+
 export interface SchoolDoc {
   domain: string;
   name: string;
   type: "middle" | "high" | "k12";
   approved: boolean;
+  status?: SchoolStatus;
+  adminEmail?: string;
   adminUid?: string;
+  campus?: string;
+  address?: string;
+  location?: string;
   brandColor: string;
   logoUrl?: string;
   subjects: string[];
@@ -114,7 +121,7 @@ export interface StatsDoc {
 export interface AdminAuditLog {
   id: string;
   adminUid: string;
-  action: "suspend_user" | "unsuspend_user" | "delete_review" | "update_subjects" | "update_branding";
+  action: "suspend_user" | "unsuspend_user" | "approve_user" | "delete_review" | "update_subjects" | "update_branding" | "approve_school" | "reject_school" | "remove_school" | "add_school" | "promote_superadmin" | "promote_schooladmin" | "demote_schooladmin";
   targetId: string;
   reason?: string;
   metadata?: Record<string, unknown>;
@@ -167,7 +174,7 @@ export interface AuthUser {
   email: string;
   name: string;
   role: UserRole;
-  grade: GradeLevel;
-  schoolDomain: string;
+  grade: GradeLevel | null;
+  schoolDomain: string | null;
   status: AccountStatus;
 }

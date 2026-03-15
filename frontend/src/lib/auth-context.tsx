@@ -8,7 +8,7 @@ import {
   sendPasswordResetEmail,
   type User as FirebaseUser,
 } from "firebase/auth";
-import { doc, setDoc, serverTimestamp } from "firebase/firestore";
+import { doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "./firebase";
 import { getUserDoc } from "./firestore";
 import type { AuthUser, UserRole, GradeLevel } from "./types";
@@ -27,7 +27,7 @@ interface SignUpParams {
   email: string;
   password: string;
   name: string;
-  grade: GradeLevel;
+  grade: GradeLevel | null;
   role: UserRole;
 }
 
@@ -83,14 +83,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const domain = email.split("@")[1];
 
-    // Check domain is registered (Cloud Function handles this too but we pre-validate)
-    // Domain check happens server-side in onUserCreate Cloud Function
+    // Check domain is registered and approved in Firestore
+    const schoolSnap = await getDoc(doc(db, "schools", domain));
+    if (!schoolSnap.exists()) {
+      throw new Error("Your school is not registered on PeerTutor yet. Ask your school administrator to register.");
+    }
+    const schoolData = schoolSnap.data();
+    const isApproved = schoolData.status === "approved" || (schoolData.approved === true && !schoolData.status);
+    if (!isApproved) {
+      throw new Error("Your school's registration is still pending approval. Please try again later.");
+    }
 
     const credential = await createUserWithEmailAndPassword(auth, email, password);
     const { uid } = credential.user;
-
-    // Determine if COPPA consent required (grade 6 or 7 → likely under 13)
-    const needsConsent = grade === "6th" || grade === "7th";
 
     // Write user document — Cloud Function will also set custom claims
     await setDoc(doc(db, "users", uid), {
@@ -99,7 +104,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       grade,
       role,
       schoolDomain: domain,
-      status: needsConsent ? "pending_consent" : "active",
+      status: "pending",
       subjects: [],
       bio: "",
       avgRating: 0,

@@ -3,17 +3,33 @@ import { useState, useEffect } from "react";
 import { useAuth } from "@/lib/auth-context";
 import {
   subscribeStats, subscribeSchoolReviews, usersCol, flagReview,
+  getSchoolDoc,
 } from "@/lib/firestore";
-import { suspendUser, unsuspendUser, deleteReview } from "@/lib/functions";
+// Direct Firestore writes (Cloud Functions don't work in emulator)
 import {
   Button, Input, Select, Modal, Toast, Badge, Divider,
 } from "@/components/shared/ui";
-import type { StatsDoc, ReviewDoc, UserDoc } from "@/lib/types";
-import { query, where, onSnapshot } from "firebase/firestore";
+import type { StatsDoc, ReviewDoc, UserDoc, SchoolDoc } from "@/lib/types";
+import { query, where, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, collection, addDoc } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 import {
   Users, Star, CalendarCheck, AlertTriangle, Shield, Flag,
-  CheckCircle, Ban, Trash2, Download, Palette,
+  CheckCircle, Ban, Trash2, Download, Palette, UserPlus, UserMinus, UserCheck,
 } from "lucide-react";
+
+const projectId = import.meta.env.VITE_FIREBASE_PROJECT_ID || "peertutor-dev";
+const emulatorHost = import.meta.env.VITE_EMULATOR_HOST || "localhost";
+
+async function updateCustomClaims(uid: string, claims: Record<string, unknown>) {
+  await fetch(
+    `http://${emulatorHost}:9099/identitytoolkit.googleapis.com/v1/projects/${projectId}/accounts:update`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer owner" },
+      body: JSON.stringify({ localId: uid, customAttributes: JSON.stringify(claims) }),
+    }
+  );
+}
 import { format } from "date-fns";
 
 export default function AdminDashboard() {
@@ -23,7 +39,11 @@ export default function AdminDashboard() {
   const [stats, setStats]     = useState<StatsDoc | null>(null);
   const [reviews, setReviews] = useState<ReviewDoc[]>([]);
   const [users, setUsers]     = useState<UserDoc[]>([]);
-  const [tab, setTab]         = useState<"overview" | "users" | "reviews" | "branding">("overview");
+  const [tab, setTab]         = useState<"overview" | "users" | "reviews" | "branding" | "admins">("overview");
+
+  // School doc for primary admin check
+  const [schoolDoc, setSchoolDoc] = useState<SchoolDoc | null>(null);
+  const isPrimaryAdmin = !!(schoolDoc && currentUser && schoolDoc.adminEmail === currentUser.email);
 
   // Modals
   const [suspendModal, setSuspendModal]   = useState<UserDoc | null>(null);
@@ -31,6 +51,15 @@ export default function AdminDashboard() {
   const [suspendReason, setSuspendReason] = useState("");
   const [deleteReviewModal, setDeleteReviewModal] = useState<ReviewDoc | null>(null);
   const [deleteReason, setDeleteReason]   = useState("");
+
+  // Admin management
+  const [addAdminModal, setAddAdminModal] = useState(false);
+  const [adminEmail, setAdminEmail]       = useState("");
+  const [removeAdminModal, setRemoveAdminModal] = useState<UserDoc | null>(null);
+
+  // Profile editing
+  const [editProfileModal, setEditProfileModal] = useState(false);
+  const [profileName, setProfileName] = useState("");
 
   // Branding
   const [brandColor, setBrandColor] = useState("#0055FF");
@@ -48,16 +77,139 @@ export default function AdminDashboard() {
     const u3 = onSnapshot(q, (snap) => {
       setUsers(snap.docs.map((d) => ({ uid: d.id, ...d.data() } as UserDoc)));
     });
+    // Fetch school doc for primary admin check
+    getSchoolDoc(domain).then(setSchoolDoc);
     return () => { u1(); u2(); u3(); };
   }, [domain]);
 
-  const handleSuspend = async () => {
-    if (!suspendModal) return;
+  const schoolAdmins = users.filter((u) => u.role === "schooladmin");
+  const nonAdminUsers = users.filter((u) => !["schooladmin", "superadmin"].includes(u.role));
+
+  const handleAddAdmin = async () => {
+    if (!adminEmail || !domain || !currentUser) return;
+    const target = users.find((u) => u.email.toLowerCase() === adminEmail.toLowerCase());
+    if (!target) {
+      setToast({ msg: "User not found in this school", type: "error" });
+      setAddAdminModal(false);
+      setAdminEmail("");
+      return;
+    }
+    if (target.role === "schooladmin") {
+      setToast({ msg: "User is already a school admin", type: "error" });
+      setAddAdminModal(false);
+      setAdminEmail("");
+      return;
+    }
     try {
-      await suspendUser({
-        targetUid: suspendModal.uid,
-        durationDays: suspendDays === "indefinite" ? null : Number(suspendDays),
+      await updateDoc(doc(db, "users", target.uid), {
+        role: "schooladmin",
+        updatedAt: serverTimestamp(),
+      });
+      await addDoc(collection(db, "adminAuditLog"), {
+        adminUid: currentUser.uid,
+        action: "promote_schooladmin",
+        targetId: target.uid,
+        schoolDomain: domain,
+        timestamp: serverTimestamp(),
+      });
+      await updateCustomClaims(target.uid, {
+        role: "schooladmin",
+        schoolDomain: domain,
+        status: target.status,
+      });
+      setToast({ msg: `${target.name} promoted to school admin`, type: "success" });
+    } catch {
+      setToast({ msg: "Failed to promote user", type: "error" });
+    }
+    setAddAdminModal(false);
+    setAdminEmail("");
+  };
+
+  const handleRemoveAdmin = async () => {
+    if (!removeAdminModal || !currentUser || !domain) return;
+    try {
+      await updateDoc(doc(db, "users", removeAdminModal.uid), {
+        role: "tutor",
+        updatedAt: serverTimestamp(),
+      });
+      await addDoc(collection(db, "adminAuditLog"), {
+        adminUid: currentUser.uid,
+        action: "demote_schooladmin",
+        targetId: removeAdminModal.uid,
+        schoolDomain: domain,
+        timestamp: serverTimestamp(),
+      });
+      await updateCustomClaims(removeAdminModal.uid, {
+        role: "tutor",
+        schoolDomain: domain,
+        status: removeAdminModal.status,
+      });
+      setToast({ msg: `${removeAdminModal.name} removed as school admin`, type: "success" });
+    } catch {
+      setToast({ msg: "Failed to remove admin", type: "error" });
+    }
+    setRemoveAdminModal(null);
+  };
+
+  const handleSaveProfile = async () => {
+    if (!currentUser || !profileName) return;
+    try {
+      await updateDoc(doc(db, "users", currentUser.uid), {
+        name: profileName,
+        updatedAt: serverTimestamp(),
+      });
+      setToast({ msg: "Profile updated", type: "success" });
+      setEditProfileModal(false);
+    } catch {
+      setToast({ msg: "Update failed", type: "error" });
+    }
+  };
+
+  const handleApproveUser = async (user: UserDoc) => {
+    if (!currentUser) return;
+    try {
+      await updateDoc(doc(db, "users", user.uid), {
+        status: "active",
+        updatedAt: serverTimestamp(),
+      });
+      await updateCustomClaims(user.uid, {
+        role: user.role,
+        schoolDomain: user.schoolDomain,
+        status: "active",
+      });
+      await addDoc(collection(db, "adminAuditLog"), {
+        adminUid: currentUser.uid,
+        action: "approve_user",
+        targetId: user.uid,
+        schoolDomain: domain,
+        timestamp: serverTimestamp(),
+      });
+      setToast({ msg: `${user.name} approved`, type: "success" });
+    } catch {
+      setToast({ msg: "Approve failed", type: "error" });
+    }
+  };
+
+  const handleSuspend = async () => {
+    if (!suspendModal || !currentUser) return;
+    try {
+      await updateDoc(doc(db, "users", suspendModal.uid), {
+        status: "suspended",
+        updatedAt: serverTimestamp(),
+      });
+      await updateCustomClaims(suspendModal.uid, {
+        role: suspendModal.role,
+        schoolDomain: suspendModal.schoolDomain,
+        status: "suspended",
+      });
+      await addDoc(collection(db, "adminAuditLog"), {
+        adminUid: currentUser.uid,
+        action: "suspend_user",
+        targetId: suspendModal.uid,
         reason: suspendReason,
+        metadata: { durationDays: suspendDays === "indefinite" ? null : Number(suspendDays) },
+        schoolDomain: domain,
+        timestamp: serverTimestamp(),
       });
       setToast({ msg: `${suspendModal.name} suspended`, type: "success" });
     } catch {
@@ -68,8 +220,24 @@ export default function AdminDashboard() {
   };
 
   const handleUnsuspend = async (user: UserDoc) => {
+    if (!currentUser) return;
     try {
-      await unsuspendUser({ targetUid: user.uid });
+      await updateDoc(doc(db, "users", user.uid), {
+        status: "active",
+        updatedAt: serverTimestamp(),
+      });
+      await updateCustomClaims(user.uid, {
+        role: user.role,
+        schoolDomain: user.schoolDomain,
+        status: "active",
+      });
+      await addDoc(collection(db, "adminAuditLog"), {
+        adminUid: currentUser.uid,
+        action: "unsuspend_user",
+        targetId: user.uid,
+        schoolDomain: domain,
+        timestamp: serverTimestamp(),
+      });
       setToast({ msg: `${user.name} reinstated`, type: "success" });
     } catch {
       setToast({ msg: "Unsuspend failed", type: "error" });
@@ -77,9 +245,17 @@ export default function AdminDashboard() {
   };
 
   const handleDeleteReview = async () => {
-    if (!deleteReviewModal) return;
+    if (!deleteReviewModal || !currentUser) return;
     try {
-      await deleteReview({ reviewId: deleteReviewModal.id, reason: deleteReason });
+      await deleteDoc(doc(db, "reviews", deleteReviewModal.id));
+      await addDoc(collection(db, "adminAuditLog"), {
+        adminUid: currentUser.uid,
+        action: "delete_review",
+        targetId: deleteReviewModal.id,
+        reason: deleteReason,
+        schoolDomain: domain,
+        timestamp: serverTimestamp(),
+      });
       setToast({ msg: "Review removed", type: "success" });
     } catch {
       setToast({ msg: "Delete failed", type: "error" });
@@ -99,12 +275,20 @@ export default function AdminDashboard() {
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
       {/* Header */}
-      <div className="mb-6">
-        <div className="flex items-center gap-2 mb-1">
-          <Shield className="w-5 h-5 text-brand-500" />
-          <h1 className="font-display text-3xl text-gray-900">Admin Dashboard</h1>
+      <div className="flex items-start justify-between mb-6">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <Shield className="w-5 h-5 text-brand-500" />
+            <h1 className="font-display text-3xl text-gray-900">School Admin Dashboard</h1>
+          </div>
+          <p className="text-gray-500 text-sm">{domain} · School Administrator</p>
         </div>
-        <p className="text-gray-500 text-sm">{domain} · School Administrator</p>
+        <Button variant="secondary" onClick={() => {
+          setProfileName(currentUser?.name ?? "");
+          setEditProfileModal(true);
+        }}>
+          Edit Profile
+        </Button>
       </div>
 
       {/* Tab nav */}
@@ -114,6 +298,7 @@ export default function AdminDashboard() {
           { key: "users",    label: `Users (${users.length})` },
           { key: "reviews",  label: `Reviews${flaggedReviews.length > 0 ? ` · ${flaggedReviews.length} flagged` : ""}` },
           { key: "branding", label: "Branding" },
+          ...(isPrimaryAdmin ? [{ key: "admins" as const, label: `School Admins (${schoolAdmins.length})` }] : []),
         ] as const).map(({ key, label }) => (
           <button
             key={key}
@@ -198,8 +383,8 @@ export default function AdminDashboard() {
                     <td className="px-4 py-3 text-gray-500">{user.email}</td>
                     <td className="px-4 py-3 text-gray-500">{user.grade}</td>
                     <td className="px-4 py-3">
-                      <Badge color={user.role === "tutor" ? "blue" : user.role === "tutee" ? "green" : "amber"}>
-                        {user.role}
+                      <Badge color={user.role === "schooladmin" ? "purple" : user.role === "teacher" ? "indigo" : user.role === "tutor" ? "blue" : user.role === "tutee" ? "green" : "amber"}>
+                        {user.role === "schooladmin" ? "admin" : user.role}
                       </Badge>
                     </td>
                     <td className="px-4 py-3">
@@ -212,21 +397,29 @@ export default function AdminDashboard() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex gap-1">
-                        {user.status !== "suspended" ? (
+                        {user.status === "pending" ? (
                           <button
-                            onClick={() => { setSuspendModal(user); setSuspendDays("7"); }}
-                            className="p-1.5 text-gray-400 hover:text-red-500 transition-colors"
-                            title="Suspend user"
+                            onClick={() => handleApproveUser(user)}
+                            className="p-1.5 text-gray-400 hover:text-green-500 transition-colors"
+                            title="Approve user"
                           >
-                            <Ban className="w-4 h-4" />
+                            <UserCheck className="w-4 h-4" />
                           </button>
-                        ) : (
+                        ) : user.status === "suspended" ? (
                           <button
                             onClick={() => handleUnsuspend(user)}
                             className="p-1.5 text-gray-400 hover:text-green-500 transition-colors"
                             title="Reinstate user"
                           >
                             <CheckCircle className="w-4 h-4" />
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => { setSuspendModal(user); setSuspendDays("7"); }}
+                            className="p-1.5 text-gray-400 hover:text-red-500 transition-colors"
+                            title="Suspend user"
+                          >
+                            <Ban className="w-4 h-4" />
                           </button>
                         )}
                       </div>
@@ -341,6 +534,109 @@ export default function AdminDashboard() {
         </div>
       )}
 
+      {/* ── School Admins ── */}
+      {tab === "admins" && isPrimaryAdmin && (
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="font-display text-xl text-gray-900">School Administrators</h2>
+            <Button size="sm" onClick={() => setAddAdminModal(true)}>
+              <UserPlus className="w-3.5 h-3.5" /> Add Admin
+            </Button>
+          </div>
+
+          <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 border-b border-gray-200">
+                <tr>
+                  {["Name", "Email", "Status", "Type", "Actions"].map((h) => (
+                    <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {schoolAdmins.map((admin) => {
+                  const isPrimary = admin.email === schoolDoc?.adminEmail;
+                  return (
+                    <tr key={admin.uid} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 font-medium text-gray-900">{admin.name}</td>
+                      <td className="px-4 py-3 text-gray-500">{admin.email}</td>
+                      <td className="px-4 py-3">
+                        <Badge color={admin.status === "active" ? "green" : "red"}>
+                          {admin.status}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3">
+                        <Badge color={isPrimary ? "blue" : "gray"}>
+                          {isPrimary ? "Primary" : "Added"}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3">
+                        {!isPrimary && (
+                          <button
+                            onClick={() => setRemoveAdminModal(admin)}
+                            className="p-1.5 text-gray-400 hover:text-red-500 transition-colors"
+                            title="Remove admin role"
+                          >
+                            <UserMinus className="w-4 h-4" />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {schoolAdmins.length === 0 && (
+              <div className="text-center py-10 text-gray-400 text-sm">No school admins</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Add Admin Modal ── */}
+      <Modal open={addAdminModal} onClose={() => { setAddAdminModal(false); setAdminEmail(""); }} title="Add School Admin">
+        <div className="flex flex-col gap-4">
+          <p className="text-sm text-gray-600">
+            Enter the email of a user at your school to promote them to school admin.
+            They will be able to manage users, reviews, and branding, but <strong>cannot add more admins</strong>.
+          </p>
+          <Select
+            label="Select User"
+            options={nonAdminUsers.map((u) => ({ value: u.email, label: `${u.name} (${u.email})` }))}
+            value={adminEmail}
+            onChange={(e) => setAdminEmail(e.target.value)}
+          />
+          <Divider />
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => { setAddAdminModal(false); setAdminEmail(""); }}>Cancel</Button>
+            <Button onClick={handleAddAdmin} disabled={!adminEmail}>
+              Promote to Admin
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ── Remove Admin Modal ── */}
+      <Modal open={!!removeAdminModal} onClose={() => setRemoveAdminModal(null)} title="Remove School Admin">
+        {removeAdminModal && (
+          <div className="flex flex-col gap-4">
+            <p className="text-sm text-gray-600">
+              Remove <strong>{removeAdminModal.name}</strong> as a school admin?
+              They will be reverted to a regular tutor role.
+            </p>
+            <Divider />
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setRemoveAdminModal(null)}>Cancel</Button>
+              <Button variant="danger" onClick={handleRemoveAdmin}>
+                Remove Admin
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
       {/* ── Suspend Modal ── */}
       <Modal open={!!suspendModal} onClose={() => setSuspendModal(null)} title="Suspend Account">
         {suspendModal && (
@@ -401,6 +697,23 @@ export default function AdminDashboard() {
             <Button variant="danger" onClick={handleDeleteReview} disabled={!deleteReason}>
               Delete Review
             </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ── Edit Profile Modal ── */}
+      <Modal open={editProfileModal} onClose={() => setEditProfileModal(false)} title="Edit Profile">
+        <div className="flex flex-col gap-4">
+          <Input
+            label="Name"
+            value={profileName}
+            onChange={(e) => setProfileName(e.target.value)}
+          />
+          <p className="text-xs text-gray-400">Email cannot be changed: {currentUser?.email}</p>
+          <Divider />
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setEditProfileModal(false)}>Cancel</Button>
+            <Button onClick={handleSaveProfile} disabled={!profileName}>Save</Button>
           </div>
         </div>
       </Modal>
