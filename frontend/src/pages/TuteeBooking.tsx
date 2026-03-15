@@ -1,8 +1,9 @@
 // src/pages/TuteeBooking.tsx
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { useSchool } from "@/lib/school-context";
 import { SchoolBanner } from "@/components/shared/SchoolBanner";
+import { CalendarGrid, type CalendarDot } from "@/components/shared/CalendarGrid";
 import { searchTutors, subscribeUserSessions, getRecommendedTutors } from "@/lib/firestore";
 import {
   Button, Input, Select, Modal, Toast, Badge, StarRating, Divider,
@@ -86,7 +87,14 @@ export default function TuteeBooking() {
 
   // Sessions
   const [sessions, setSessions] = useState<SessionDoc[]>([]);
-  const [tab, setTab]           = useState<"search" | "sessions">("search");
+  const [tab, setTab]           = useState<"search" | "sessions" | "calendar">("search");
+
+  // Calendar state
+  const [calYear,  setCalYear]  = useState(() => new Date().getFullYear());
+  const [calMonth, setCalMonth] = useState(() => new Date().getMonth());
+  const [calSelected, setCalSelected] = useState<string | null>(null);
+  const [calTutors,  setCalTutors]    = useState<TutorCardType[]>([]);
+  const [calLoading, setCalLoading]   = useState(false);
 
   // Modals
   const [bookModal, setBookModal]     = useState<{ tutor: TutorCardType; slot: AvailabilitySlot } | null>(null);
@@ -107,6 +115,73 @@ export default function TuteeBooking() {
     const unsub = subscribeUserSessions(currentUser.uid, "tutee", setSessions);
     return unsub;
   }, [currentUser]);
+
+  // Load all tutors when calendar tab is first opened
+  useEffect(() => {
+    if (tab !== "calendar" || !currentUser?.schoolDomain || calTutors.length > 0) return;
+    setCalLoading(true);
+    searchTutors({ schoolDomain: currentUser.schoolDomain })
+      .then(setCalTutors)
+      .finally(() => setCalLoading(false));
+  }, [tab, currentUser?.schoolDomain, calTutors.length]);
+
+  const changeCalMonth = useCallback((dir: 1 | -1) => {
+    setCalMonth((m) => {
+      const next = m + dir;
+      if (next < 0)  { setCalYear((y) => y - 1); return 11; }
+      if (next > 11) { setCalYear((y) => y + 1); return 0; }
+      return next;
+    });
+  }, []);
+
+  /** Build event dots: green = available tutor slots, blue = my sessions */
+  const calendarDots = useMemo<Record<string, CalendarDot[]>>(() => {
+    const result: Record<string, CalendarDot[]> = {};
+    const push = (date: string, dot: CalendarDot) => {
+      result[date] = [...(result[date] ?? []), dot];
+    };
+
+    // Available slots from all tutors
+    calTutors.forEach((tutor) => {
+      tutor.availableSlots.forEach((slot) => {
+        getAvailableDates(slot).forEach((d) => {
+          // Only add one green dot per tutor per day to avoid clutter
+          if (!(result[d] ?? []).some((x) => x.color === "green" && x.label === tutor.name)) {
+            push(d, { color: "green", label: tutor.name });
+          }
+        });
+      });
+    });
+
+    // My booked sessions
+    sessions.filter((s) => s.status === "upcoming").forEach((s) => {
+      const d = s.scheduledDate.toDate().toISOString().split("T")[0];
+      push(d, { color: "blue", label: s.tutorName });
+    });
+
+    return result;
+  }, [calTutors, sessions]);
+
+  /** Tutors who have available slots on the selected calendar day */
+  const calDayTutors = useMemo(() => {
+    if (!calSelected) return [];
+    return calTutors
+      .map((tutor) => ({
+        tutor,
+        slots: tutor.availableSlots.filter((slot) =>
+          getAvailableDates(slot).includes(calSelected)
+        ),
+      }))
+      .filter(({ slots }) => slots.length > 0);
+  }, [calSelected, calTutors]);
+
+  /** My sessions on the selected calendar day */
+  const calDaySessions = useMemo(() => {
+    if (!calSelected) return [];
+    return sessions.filter(
+      (s) => s.scheduledDate.toDate().toISOString().split("T")[0] === calSelected
+    );
+  }, [calSelected, sessions]);
 
   const handleSearch = async () => {
     if (!currentUser) return;
@@ -350,17 +425,21 @@ export default function TuteeBooking() {
       </div>
 
       {/* Tab toggle */}
-      <div className="flex gap-1 bg-gray-100 rounded-lg p-1 mb-6 max-w-xs">
-        {(["search", "sessions"] as const).map((t) => (
+      <div className="flex gap-1 bg-gray-100 rounded-lg p-1 mb-6 w-fit">
+        {([
+          { key: "search",   label: "Search"      },
+          { key: "calendar", label: "Calendar"     },
+          { key: "sessions", label: "My Sessions"  },
+        ] as const).map(({ key, label }) => (
           <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`flex-1 py-2 rounded text-sm font-medium transition-colors relative ${
-              tab === t ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
+            key={key}
+            onClick={() => setTab(key)}
+            className={`px-4 py-2 rounded text-sm font-medium transition-colors relative ${
+              tab === key ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
             }`}
           >
-            {t === "search" ? "Search" : "My Sessions"}
-            {t === "sessions" && completed.length > 0 && (
+            {label}
+            {key === "sessions" && completed.length > 0 && (
               <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-brand-500 text-white text-[9px] flex items-center justify-center">
                 {completed.length}
               </span>
@@ -502,6 +581,140 @@ export default function TuteeBooking() {
             </div>
           )}
         </>
+      )}
+
+      {/* ── Calendar Tab ── */}
+      {tab === "calendar" && (
+        <div className="grid grid-cols-1 lg:grid-cols-[400px_1fr] gap-6">
+          {/* Calendar panel */}
+          <div className="bg-white rounded-lg border border-gray-200 p-5">
+            <h2 className="font-display text-lg text-gray-900 mb-4">Tutor Availability</h2>
+            {calLoading ? (
+              <div className="text-center py-16 text-gray-400 text-sm">Loading tutors…</div>
+            ) : (
+              <>
+                <CalendarGrid
+                  year={calYear}
+                  month={calMonth}
+                  dots={calendarDots}
+                  selectedDate={calSelected ?? undefined}
+                  onDayClick={(d) => setCalSelected(calSelected === d ? null : d)}
+                  onMonthChange={changeCalMonth}
+                />
+                {/* Legend */}
+                <div className="flex flex-wrap gap-3 mt-4 text-xs text-gray-500">
+                  {[
+                    { color: "bg-green-500", label: "Tutor available" },
+                    { color: "bg-blue-500",  label: "My session"      },
+                  ].map(({ color, label }) => (
+                    <span key={label} className="flex items-center gap-1.5">
+                      <span className={`w-2 h-2 rounded-full ${color}`} />
+                      {label}
+                    </span>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Day detail panel */}
+          <div className="bg-white rounded-lg border border-gray-200 p-5">
+            {!calSelected ? (
+              <div className="h-full flex flex-col items-center justify-center text-center text-gray-400 py-16">
+                <Calendar className="w-10 h-10 mb-3 opacity-30" />
+                <p className="text-sm font-medium text-gray-500 mb-1">Pick a day</p>
+                <p className="text-xs">Green dots show days when tutors are available to book.</p>
+              </div>
+            ) : (
+              <div>
+                <h3 className="font-display text-base text-gray-900 mb-4">
+                  {format(new Date(calSelected + "T12:00:00"), "EEEE, MMMM d")}
+                </h3>
+
+                {/* My sessions on this day */}
+                {calDaySessions.length > 0 && (
+                  <div className="mb-5">
+                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Your Sessions</p>
+                    <div className="flex flex-col gap-2">
+                      {calDaySessions.map((s) => (
+                        <div key={s.id} className="flex items-center gap-3 px-3 py-2.5 rounded border bg-blue-50 border-blue-100 text-sm text-blue-800">
+                          <Calendar className="w-3.5 h-3.5 opacity-60" />
+                          <span className="font-medium">{s.tutorName}</span>
+                          <Badge color="blue">{s.subject}</Badge>
+                          <span className="text-xs opacity-60">{s.startTime}–{s.endTime}</span>
+                          {s.meetLink && (
+                            <a href={s.meetLink} target="_blank" rel="noopener noreferrer" className="ml-auto">
+                              <Button size="sm"><Video className="w-3 h-3" /> Join</Button>
+                            </a>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Available tutors on this day */}
+                {calDayTutors.length === 0 && calDaySessions.length === 0 && (
+                  <div className="text-center py-10 text-gray-400">
+                    <Clock className="w-7 h-7 mx-auto mb-2 opacity-40" />
+                    <p className="text-sm">No tutors available on this day.</p>
+                  </div>
+                )}
+
+                {calDayTutors.length > 0 && (
+                  <>
+                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+                      Available Tutors — {calDayTutors.length}
+                    </p>
+                    <div className="flex flex-col gap-3">
+                      {calDayTutors.map(({ tutor, slots }) => (
+                        <div key={tutor.uid} className="border border-gray-100 rounded-lg p-4">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-2">
+                              <div className="w-8 h-8 rounded-full bg-brand-100 flex items-center justify-center text-brand-600 font-semibold text-sm">
+                                {tutor.name.charAt(0)}
+                              </div>
+                              <div>
+                                <p className="font-medium text-gray-900 text-sm">{tutor.name}</p>
+                                <p className="text-xs text-gray-400">{tutor.grade}</p>
+                              </div>
+                            </div>
+                            {tutor.avgRating > 0 && (
+                              <div className="flex items-center gap-1 text-xs text-gray-500">
+                                <Star className="w-3 h-3 text-amber-400 fill-amber-400" />
+                                {tutor.avgRating.toFixed(1)}
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap gap-1 mb-3">
+                            {tutor.subjects.slice(0, 3).map((s) => (
+                              <Badge key={s} color="blue">{s}</Badge>
+                            ))}
+                            {tutor.subjects.length > 3 && <Badge color="gray">+{tutor.subjects.length - 3}</Badge>}
+                          </div>
+                          <div className="flex flex-col gap-1.5">
+                            {slots.map((slot) => (
+                              <div key={slot.id} className="flex items-center justify-between bg-green-50 border border-green-100 rounded px-3 py-2 text-sm text-green-700">
+                                <span className="font-medium">{slot.startTime}–{slot.endTime} <span className="text-xs opacity-60">({slot.duration} min)</span></span>
+                                <Button size="sm" onClick={() => {
+                                  setBookModal({ tutor, slot });
+                                  setBookingSubject(tutor.subjects[0] ?? "");
+                                  setBookingDate(calSelected);
+                                }}>
+                                  Book
+                                </Button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
       {/* ── Sessions Tab ── */}
