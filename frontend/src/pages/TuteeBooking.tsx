@@ -76,6 +76,7 @@ export default function TuteeBooking() {
   const [subject, setSubject]   = useState("");
   const [day, setDay]           = useState("");
   const [date, setDate]         = useState("");
+  const [nameFilter, setNameFilter] = useState("");
   const [tutors, setTutors]     = useState<TutorCardType[]>([]);
   const [searching, setSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
@@ -231,20 +232,25 @@ export default function TuteeBooking() {
     }
   };
 
-  // Sort tutors based on selected mode
-  const sortedTutors = [...tutors].sort((a, b) => {
-    switch (sortMode) {
-      case "recommended":
-        // AI score first, fallback to rating
-        return (b.aiScore ?? 0) - (a.aiScore ?? 0) || b.avgRating - a.avgRating;
-      case "rating":
-        return b.avgRating - a.avgRating || b.reviewCount - a.reviewCount;
-      case "availability":
-        return b.availableSlots.length - a.availableSlots.length;
-      default:
-        return 0;
-    }
-  });
+  // Sort tutors based on selected mode, then client-side filter by name
+  const sortedTutors = [...tutors]
+    .sort((a, b) => {
+      switch (sortMode) {
+        case "recommended":
+          // AI score first, fallback to rating
+          return (b.aiScore ?? 0) - (a.aiScore ?? 0) || b.avgRating - a.avgRating;
+        case "rating":
+          return b.avgRating - a.avgRating || b.reviewCount - a.reviewCount;
+        case "availability":
+          return b.availableSlots.length - a.availableSlots.length;
+        default:
+          return 0;
+      }
+    })
+    .filter((t) =>
+      !nameFilter.trim() ||
+      t.name.toLowerCase().includes(nameFilter.trim().toLowerCase())
+    );
 
   const handleBook = async () => {
     if (!bookModal || !currentUser || !bookingDate) return;
@@ -454,14 +460,34 @@ export default function TuteeBooking() {
           {/* Filters */}
           <div className="bg-white border border-gray-200 rounded-lg p-4 mb-6">
             <div className="flex flex-col sm:flex-row gap-3">
-              <Select
-                label="Subject"
-                placeholder="Any subject"
-                options={DEFAULT_SUBJECTS.map((s) => ({ value: s, label: s }))}
-                value={subject}
-                onChange={(e) => setSubject(e.target.value)}
-                className="flex-1"
-              />
+              {/* Subject — free-text with datalist suggestions */}
+              <div className="flex-1 flex flex-col gap-1">
+                <label className="text-xs font-medium text-gray-600">Subject</label>
+                <input
+                  list="subject-suggestions"
+                  value={subject}
+                  onChange={(e) => setSubject(e.target.value)}
+                  placeholder="Any subject (e.g. Calculus, Latin…)"
+                  className="h-9 rounded-lg border border-gray-300 px-3 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-400 focus:border-transparent w-full"
+                />
+                <datalist id="subject-suggestions">
+                  {DEFAULT_SUBJECTS.map((s) => (
+                    <option key={s} value={s} />
+                  ))}
+                </datalist>
+              </div>
+
+              {/* Tutor name — client-side filter */}
+              <div className="flex-1 flex flex-col gap-1">
+                <label className="text-xs font-medium text-gray-600">Tutor Name</label>
+                <input
+                  value={nameFilter}
+                  onChange={(e) => setNameFilter(e.target.value)}
+                  placeholder="Search by name…"
+                  className="h-9 rounded-lg border border-gray-300 px-3 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-400 focus:border-transparent w-full"
+                />
+              </div>
+
               <Select
                 label="Day"
                 placeholder="Any day"
@@ -484,9 +510,9 @@ export default function TuteeBooking() {
                 </Button>
               </div>
             </div>
-            {(subject || day || date) && (
+            {(subject || nameFilter || day || date) && (
               <button
-                onClick={() => { setSubject(""); setDay(""); setDate(""); }}
+                onClick={() => { setSubject(""); setNameFilter(""); setDay(""); setDate(""); }}
                 className="mt-2 text-xs text-brand-600 hover:text-brand-700"
               >
                 Clear all filters
@@ -499,20 +525,27 @@ export default function TuteeBooking() {
             <div className="text-center py-16 text-gray-400 text-sm">Searching...</div>
           )}
 
-          {!searching && hasSearched && tutors.length === 0 && (
+          {!searching && hasSearched && sortedTutors.length === 0 && (
             <div className="text-center py-16 text-gray-400">
               <User className="w-10 h-10 mx-auto mb-3 opacity-30" />
-              <p className="font-medium text-gray-600 mb-1">No tutors found</p>
+              <p className="font-medium text-gray-600 mb-1">
+                {tutors.length > 0 && nameFilter.trim()
+                  ? `No tutors named "${nameFilter.trim()}" in results`
+                  : "No tutors found"}
+              </p>
               <p className="text-sm">Try removing filters or check back later.</p>
             </div>
           )}
 
-          {!searching && tutors.length > 0 && (
+          {!searching && sortedTutors.length > 0 && (
             <>
               {/* Sort controls + AI badge */}
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm text-gray-500">{tutors.length} tutor{tutors.length !== 1 ? "s" : ""} found</span>
+                  <span className="text-sm text-gray-500">
+                    {sortedTutors.length}{tutors.length !== sortedTutors.length ? ` of ${tutors.length}` : ""} tutor{sortedTutors.length !== 1 ? "s" : ""} found
+                    {nameFilter.trim() ? ` matching "${nameFilter.trim()}"` : ""}
+                  </span>
                   {aiLoading && (
                     <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-purple-50 text-purple-600 text-xs font-medium animate-pulse">
                       <Sparkles className="w-3 h-3" />
