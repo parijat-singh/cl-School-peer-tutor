@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Git pre-commit hook — auto-sync .env.example before each commit
+# ─────────────────────────────────────────────────────────────────
+# Install: bash scripts/install-hooks.sh
+# ─────────────────────────────────────────────────────────────────
+
+set -euo pipefail
+
+# Find project root (works in worktrees too)
+ROOT_DIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+
+ENV_FILE="$ROOT_DIR/.env"
+SYNC_SCRIPT="$ROOT_DIR/scripts/sync-env.sh"
+
+# Only run if both .env and the sync script exist
+if [ -f "$ENV_FILE" ] && [ -f "$SYNC_SCRIPT" ]; then
+  echo "[pre-commit] Syncing .env.example..."
+  bash "$SYNC_SCRIPT"
+
+  # If .env.example was modified, stage it automatically
+  if git diff --name-only -- .env.example | grep -q ".env.example"; then
+    git add .env.example
+    echo "[pre-commit] Staged updated .env.example"
+  fi
+fi
+
+# Safety check: block commit if .env is staged
+if git diff --cached --name-only | grep -qE "^\.env$"; then
+  echo ""
+  echo "╔══════════════════════════════════════════════════════════╗"
+  echo "║  BLOCKED: .env contains secrets — do NOT commit it!     ║"
+  echo "║  Run: git reset HEAD .env                               ║"
+  echo "╚══════════════════════════════════════════════════════════╝"
+  echo ""
+  exit 1
+fi
+
+# Safety check: block commit if service-account.json is staged
+if git diff --cached --name-only | grep -qE "service-account.*\.json$"; then
+  echo ""
+  echo "╔══════════════════════════════════════════════════════════╗"
+  echo "║  BLOCKED: service account key detected — do NOT commit! ║"
+  echo "║  Run: git reset HEAD <file>                             ║"
+  echo "╚══════════════════════════════════════════════════════════╝"
+  echo ""
+  exit 1
+fi
