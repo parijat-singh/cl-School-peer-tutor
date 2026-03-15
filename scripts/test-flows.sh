@@ -616,6 +616,91 @@ assert_equals "$(extract_string "$DOC" "logoUrl")" "https://storage.example.com/
 echo ""
 
 # ══════════════════════════════════════════════════════════════════
+# TEST 14: Tutor profile save — subjects and bio persisted
+# ══════════════════════════════════════════════════════════════════
+# Regression: Edit Profile modal used to silently fail because the
+# Zod schema required subjects but the field was never synced to RHF
+# state. Fix: removed subjects from the schema; subjects saved from
+# local state directly. Verified the underlying Firestore PATCH here.
+echo -e "${CYAN}[T14] Tutor profile save — subjects and bio persisted${NC}"
+
+update_doc "users/user-both-001" '{
+  "name":    {"stringValue": "Taylor Morgan"},
+  "grade":   {"stringValue": "11th"},
+  "subjects": {"arrayValue": {"values": [
+    {"stringValue": "English"},
+    {"stringValue": "History"}
+  ]}},
+  "bio": {"stringValue": "Passionate about English and History. Happy to help!"}
+}' > /dev/null
+
+DOC=$(get_doc "users/user-both-001")
+assert_equals "$(extract_string "$DOC" "name")"  "Taylor Morgan" "Profile name preserved"
+assert_equals "$(extract_string "$DOC" "grade")" "11th"          "Profile grade preserved"
+assert_equals "$(extract_string "$DOC" "bio")"   "Passionate about English and History. Happy to help!" "Bio saved correctly"
+
+# Verify subjects array is present in the response
+if echo "$DOC" | grep -q '"English"'; then
+  pass "subjects array contains English"
+else
+  fail "subjects array contains English" "English in subjects" "not found"
+fi
+if echo "$DOC" | grep -q '"History"'; then
+  pass "subjects array contains History"
+else
+  fail "subjects array contains History" "History in subjects" "not found"
+fi
+
+# Verify unrelated fields (role, schoolDomain, email) are NOT clobbered by the PATCH
+assert_equals "$(extract_string "$DOC" "role")"         "both"        "Role unchanged after profile edit"
+assert_equals "$(extract_string "$DOC" "schoolDomain")" "lincoln.edu" "schoolDomain unchanged after profile edit"
+echo ""
+
+# ══════════════════════════════════════════════════════════════════
+# TEST 15: Specific-date availability slot — correct fields, no undefined
+# ══════════════════════════════════════════════════════════════════
+# Regression: addAvailabilitySlot passed bookedDates:undefined and
+# cancelledDates:undefined for one-off slots, which Firestore rejects.
+# Fix: conditional spread in firestore.ts strips undefined fields.
+echo -e "${CYAN}[T15] Specific-date slot — created with correct fields, no bookedDates/cancelledDates${NC}"
+
+create_doc "users/user-both-001/availability/slot-test-specific" '{
+  "recurring":    {"booleanValue": false},
+  "day":          {"stringValue": "Wednesday"},
+  "date":         {"stringValue": "2026-04-01"},
+  "startTime":    {"stringValue": "10:00"},
+  "endTime":      {"stringValue": "11:00"},
+  "duration":     {"integerValue": "60"},
+  "booked":       {"booleanValue": false},
+  "schoolDomain": {"stringValue": "lincoln.edu"},
+  "createdAt":    {"timestampValue": "'"${NOW}"'"}
+}' > /dev/null
+
+DOC=$(get_doc "users/user-both-001/availability/slot-test-specific")
+assert_equals "$(extract_bool "$DOC" "recurring")"    "false"        "Specific-date slot has recurring=false"
+assert_equals "$(extract_string "$DOC" "date")"       "2026-04-01"   "Specific-date slot has correct date"
+assert_equals "$(extract_string "$DOC" "startTime")"  "10:00"        "Specific-date slot has correct startTime"
+assert_equals "$(extract_string "$DOC" "endTime")"    "11:00"        "Specific-date slot has correct endTime"
+assert_equals "$(extract_int "$DOC" "duration")"      "60"           "Specific-date slot has correct duration"
+assert_equals "$(extract_bool "$DOC" "booked")"       "false"        "Specific-date slot starts unbooked"
+
+# Verify bookedDates and cancelledDates are absent (no undefined Firestore fields)
+if echo "$DOC" | grep -q '"bookedDates"'; then
+  fail "No bookedDates field on specific-date slot" "field absent" "field present"
+else
+  pass "No bookedDates field on specific-date slot"
+fi
+if echo "$DOC" | grep -q '"cancelledDates"'; then
+  fail "No cancelledDates field on specific-date slot" "field absent" "field present"
+else
+  pass "No cancelledDates field on specific-date slot"
+fi
+
+# Clean up
+delete_doc "users/user-both-001/availability/slot-test-specific"
+echo ""
+
+# ══════════════════════════════════════════════════════════════════
 # Summary
 # ══════════════════════════════════════════════════════════════════
 

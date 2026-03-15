@@ -53,10 +53,9 @@ const slotSchema = z.object({
 );
 
 const profileSchema = z.object({
-  name:     z.string().min(2, "Name must be at least 2 characters"),
-  grade:    z.string().optional(),
-  subjects: z.array(z.string()).min(1, "Select at least one subject"),
-  bio:      z.string().max(280, "Max 280 characters"),
+  name:  z.string().min(2, "Name must be at least 2 characters"),
+  grade: z.string().optional(),
+  bio:   z.string().max(280, "Max 280 characters"),
 });
 
 type SlotForm    = z.infer<typeof slotSchema>;
@@ -131,7 +130,7 @@ export default function TutorDashboard() {
 
   const slotForm = useForm<SlotForm>({
     resolver: zodResolver(slotSchema),
-    defaultValues: { duration: "60", slotType: "recurring" },
+    defaultValues: { duration: "60", slotType: "recurring", startTime: "09:00" },
   });
   const profileForm = useForm<ProfileForm>({ resolver: zodResolver(profileSchema) });
 
@@ -156,15 +155,14 @@ export default function TutorDashboard() {
       await addAvailabilitySlot(currentUser.uid, {
         recurring: isRecurring,
         day,
-        date: isRecurring ? undefined : data.date!,
+        // Only include date for specific-date slots; omitting it avoids undefined field errors in Firestore
+        ...(isRecurring ? {} : { date: data.date! }),
         startTime: data.startTime,
         endTime: addMinutes(data.startTime, dur),
         duration: dur,
         schoolDomain: currentUser.schoolDomain,
-        bookedDates: isRecurring ? {} : undefined,
-        cancelledDates: isRecurring ? [] : undefined,
       });
-      slotForm.reset({ duration: "60", slotType: "recurring" });
+      slotForm.reset({ duration: "60", slotType: "recurring", startTime: "09:00" });
       setSlotModal(false);
       setToast({ msg: isRecurring ? "Recurring slot added" : "Slot added for " + data.date, type: "success" });
     } catch {
@@ -234,7 +232,7 @@ export default function TutorDashboard() {
       await updateDoc(doc(db, "users", currentUser.uid), {
         name: data.name,
         grade: data.grade || null,
-        subjects: data.subjects,
+        subjects: selectedSubjects,
         bio: data.bio,
         updatedAt: serverTimestamp(),
       });
@@ -309,12 +307,15 @@ export default function TutorDashboard() {
           </h1>
           <p className="text-gray-500 text-sm mt-1">Tutor Dashboard</p>
         </div>
-        <Button onClick={() => {
+        <Button onClick={async () => {
+          // Load latest subjects + bio from Firestore so the form pre-fills correctly
+          const userDoc = await getUserDoc(currentUser!.uid);
+          const saved = userDoc?.subjects ?? [];
+          setSelectedSubjects(saved);
           profileForm.reset({
             name: currentUser?.name ?? "",
             grade: currentUser?.grade ?? "",
-            subjects: [],
-            bio: "",
+            bio: userDoc?.bio ?? "",
           });
           setProfileModal(true);
         }} variant="secondary">
@@ -347,7 +348,7 @@ export default function TutorDashboard() {
         <div className="bg-white rounded-lg border border-gray-200 p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="font-display text-xl text-gray-900">My Availability</h2>
-            <Button size="sm" onClick={() => { slotForm.reset({ duration: "60", slotType: "recurring" }); setSlotModal(true); }}>
+            <Button size="sm" onClick={() => { slotForm.reset({ duration: "60", slotType: "recurring", startTime: "09:00" }); setSlotModal(true); }}>
               <PlusCircle className="w-3.5 h-3.5" /> Add Slot
             </Button>
           </div>

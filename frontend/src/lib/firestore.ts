@@ -136,13 +136,18 @@ export async function addAvailabilitySlot(
   tutorUid: string,
   slot: Omit<AvailabilitySlot, "id" | "booked" | "createdAt">
 ) {
-  return addDoc(availCol(tutorUid), {
-    ...slot,
-    booked: false,
-    bookedDates: slot.recurring ? {} : undefined,
-    cancelledDates: slot.recurring ? [] : undefined,
-    createdAt: serverTimestamp(),
-  });
+  // Build the doc without any undefined fields (Firestore rejects undefined values)
+  const slotData: Record<string, unknown> = { ...slot, booked: false, createdAt: serverTimestamp() };
+  // Remove any undefined fields carried in from the caller (e.g. date, bookedDates, cancelledDates)
+  for (const key of Object.keys(slotData)) {
+    if (slotData[key] === undefined) delete slotData[key];
+  }
+  // Recurring slots always carry bookedDates / cancelledDates maps; specific-date slots do not
+  if (slot.recurring) {
+    slotData.bookedDates     = (slot as AvailabilitySlot).bookedDates     ?? {};
+    slotData.cancelledDates  = (slot as AvailabilitySlot).cancelledDates  ?? [];
+  }
+  return addDoc(availCol(tutorUid), slotData);
 }
 
 export async function removeAvailabilitySlot(tutorUid: string, slotId: string) {

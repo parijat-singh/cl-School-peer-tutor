@@ -407,7 +407,7 @@ export default function AdminDashboard() {
                     <td className="px-4 py-3 text-gray-500">{user.grade}</td>
                     <td className="px-4 py-3">
                       <Badge color={user.role === "schooladmin" ? "purple" : user.role === "teacher" ? "indigo" : user.role === "tutor" ? "blue" : user.role === "tutee" ? "green" : "amber"}>
-                        {user.role === "schooladmin" ? "admin" : user.role === "both" ? "Tutor & Tutee" : user.role}
+                        {user.role === "schooladmin" ? "admin" : user.role === "both" ? "tutor & tutee" : user.role}
                       </Badge>
                     </td>
                     <td className="px-4 py-3">
