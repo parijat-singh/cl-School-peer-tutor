@@ -287,33 +287,40 @@ create_auth_user "teacher@lincoln.edu" "Test1234!" "user-teacher-001" "Ms. Rache
 echo ""
 echo "--- Availability Slots ---"
 
-# Marcus — 3 slots
+# Marcus — 3 slots (2 recurring, 1 specific date)
 create_subdoc "users/user-tutor-001/availability/slot-001" '{
   "id": {"stringValue": "slot-001"},
+  "recurring": {"booleanValue": true},
   "day": {"stringValue": "Monday"},
   "startTime": {"stringValue": "15:00"},
   "endTime": {"stringValue": "16:00"},
   "duration": {"integerValue": "60"},
   "booked": {"booleanValue": false},
+  "bookedDates": {"mapValue": {"fields": {}}},
+  "cancelledDates": {"arrayValue": {"values": []}},
   "schoolDomain": {"stringValue": "lincoln.edu"},
   "createdAt": {"timestampValue": "'"${NOW}"'"}
 }'
 
 create_subdoc "users/user-tutor-001/availability/slot-002" '{
   "id": {"stringValue": "slot-002"},
+  "recurring": {"booleanValue": true},
   "day": {"stringValue": "Wednesday"},
   "startTime": {"stringValue": "15:00"},
   "endTime": {"stringValue": "15:45"},
   "duration": {"integerValue": "45"},
-  "booked": {"booleanValue": true},
-  "bookedBy": {"stringValue": "user-tutee-001"},
+  "booked": {"booleanValue": false},
+  "bookedDates": {"mapValue": {"fields": {"2026-03-18": {"stringValue": "user-tutee-001"}}}},
+  "cancelledDates": {"arrayValue": {"values": []}},
   "schoolDomain": {"stringValue": "lincoln.edu"},
   "createdAt": {"timestampValue": "'"${NOW}"'"}
 }'
 
 create_subdoc "users/user-tutor-001/availability/slot-003" '{
   "id": {"stringValue": "slot-003"},
+  "recurring": {"booleanValue": false},
   "day": {"stringValue": "Friday"},
+  "date": {"stringValue": "2026-03-21"},
   "startTime": {"stringValue": "14:00"},
   "endTime": {"stringValue": "14:30"},
   "duration": {"integerValue": "30"},
@@ -322,21 +329,26 @@ create_subdoc "users/user-tutor-001/availability/slot-003" '{
   "createdAt": {"timestampValue": "'"${NOW}"'"}
 }'
 
-# Emily — 2 slots
+# Emily — 2 slots (1 recurring, 1 specific date)
 create_subdoc "users/user-tutor-002/availability/slot-004" '{
   "id": {"stringValue": "slot-004"},
+  "recurring": {"booleanValue": true},
   "day": {"stringValue": "Tuesday"},
   "startTime": {"stringValue": "16:00"},
   "endTime": {"stringValue": "17:00"},
   "duration": {"integerValue": "60"},
   "booked": {"booleanValue": false},
+  "bookedDates": {"mapValue": {"fields": {}}},
+  "cancelledDates": {"arrayValue": {"values": []}},
   "schoolDomain": {"stringValue": "lincoln.edu"},
   "createdAt": {"timestampValue": "'"${NOW}"'"}
 }'
 
 create_subdoc "users/user-tutor-002/availability/slot-005" '{
   "id": {"stringValue": "slot-005"},
+  "recurring": {"booleanValue": false},
   "day": {"stringValue": "Thursday"},
+  "date": {"stringValue": "2026-03-19"},
   "startTime": {"stringValue": "15:30"},
   "endTime": {"stringValue": "16:30"},
   "duration": {"integerValue": "60"},
@@ -346,14 +358,17 @@ create_subdoc "users/user-tutor-002/availability/slot-005" '{
   "createdAt": {"timestampValue": "'"${NOW}"'"}
 }'
 
-# Taylor — 1 slot
+# Taylor — 1 recurring slot
 create_subdoc "users/user-both-001/availability/slot-006" '{
   "id": {"stringValue": "slot-006"},
+  "recurring": {"booleanValue": true},
   "day": {"stringValue": "Wednesday"},
   "startTime": {"stringValue": "14:00"},
   "endTime": {"stringValue": "14:45"},
   "duration": {"integerValue": "45"},
   "booked": {"booleanValue": false},
+  "bookedDates": {"mapValue": {"fields": {}}},
+  "cancelledDates": {"arrayValue": {"values": []}},
   "schoolDomain": {"stringValue": "lincoln.edu"},
   "createdAt": {"timestampValue": "'"${NOW}"'"}
 }'

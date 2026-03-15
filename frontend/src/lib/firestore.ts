@@ -3,12 +3,14 @@
 
 import {
   collection, doc, query, where, orderBy, limit,
-  getDocs, getDoc, onSnapshot, runTransaction,
+  getDocs, getDoc, onSnapshot,
   serverTimestamp, updateDoc, deleteDoc, addDoc,
   type QueryConstraint,
   type Unsubscribe,
 } from "firebase/firestore";
+import { httpsCallable } from "firebase/functions";
 import { db } from "./firebase";
+import { fns } from "./firebase";
 import type {
   UserDoc, AvailabilitySlot, SessionDoc, ReviewDoc,
   SchoolDoc, StatsDoc, TutorCard,
@@ -272,4 +274,46 @@ export function subscribeAllSuperAdmins(cb: (users: UserDoc[]) => void): Unsubsc
   return onSnapshot(q, (snap) => {
     cb(snap.docs.map((d) => ({ uid: d.id, ...d.data() } as UserDoc)));
   });
+}
+
+// ── AI Recommendation Engine ─────────────────────────────────
+
+export interface TutorRecommendation {
+  uid: string;
+  reason: string;
+  score: number;
+}
+
+export interface RecommendationResult {
+  ranked: TutorRecommendation[];
+  aiPowered: boolean;
+}
+
+export async function getRecommendedTutors(
+  tutors: TutorCard[],
+  searchContext: { subject?: string; date?: string; day?: string }
+): Promise<RecommendationResult> {
+  const fn = httpsCallable<unknown, RecommendationResult>(fns, "recommendTutors");
+
+  const tutorInputs = tutors.map((t) => ({
+    uid: t.uid,
+    name: t.name,
+    grade: t.grade,
+    subjects: t.subjects,
+    bio: t.bio,
+    avgRating: t.avgRating,
+    reviewCount: t.reviewCount,
+    slotCount: t.availableSlots.length,
+    hasRecurringSlots: t.availableSlots.some((s) => s.recurring),
+    hasDateSlots: t.availableSlots.some((s) => !s.recurring),
+  }));
+
+  const result = await fn({
+    tutors: tutorInputs,
+    searchSubject: searchContext.subject,
+    searchDate: searchContext.date,
+    searchDay: searchContext.day,
+  });
+
+  return result.data;
 }

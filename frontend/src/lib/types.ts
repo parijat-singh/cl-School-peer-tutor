@@ -173,6 +173,9 @@ export interface TutorCard {
   avgRating: number;
   reviewCount: number;
   availableSlots: AvailabilitySlot[];
+  // AI recommendation fields (populated after search)
+  aiScore?: number;
+  aiReason?: string;
 }
 
 export interface AuthUser {

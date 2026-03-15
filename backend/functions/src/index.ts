@@ -19,3 +19,4 @@ export { rejectSchool }         from "./schools/rejectSchool";
 export { removeSchool }         from "./schools/removeSchool";
 export { promoteSuperAdmin }    from "./auth/promoteSuperAdmin";
 export { updateTutorProfile }   from "./auth/updateTutorProfile";
+export { recommendTutors }     from "./recommendations/recommendTutors";

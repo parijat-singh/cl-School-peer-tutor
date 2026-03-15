@@ -4,9 +4,11 @@
 
 import * as functions from "firebase-functions/v2/https";
 import { db, FieldValue } from "../lib/admin";
-import * as sgMail from "@sendgrid/mail";
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const sgMailModule = require("@sendgrid/mail");
+const sgMail = sgMailModule.default ?? sgMailModule;
 
-sgMail.setApiKey(process.env.SENDGRID_API_KEY!);
+sgMail.setApiKey(process.env.SENDGRID_API_KEY ?? "");
 
 export const registerSchool = functions.onCall(
   { region: "us-central1" },

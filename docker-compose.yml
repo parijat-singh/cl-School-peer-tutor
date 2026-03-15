@@ -50,11 +50,13 @@ services:
       - /app/functions/node_modules
       - firebase-data:/app/.firebase-data
     environment:
-      - GOOGLE_APPLICATION_CREDENTIALS=/app/service-account.json
+      - FIRESTORE_EMULATOR_HOST=0.0.0.0:8080
+      - FIREBASE_AUTH_EMULATOR_HOST=0.0.0.0:9099
       - SENDGRID_API_KEY=${SENDGRID_API_KEY}
       - GOOGLE_CALENDAR_CLIENT_EMAIL=${GOOGLE_CALENDAR_CLIENT_EMAIL}
       - GOOGLE_CALENDAR_PRIVATE_KEY=${GOOGLE_CALENDAR_PRIVATE_KEY}
       - FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
     networks:
       - peertutor-net
     restart: unless-stopped

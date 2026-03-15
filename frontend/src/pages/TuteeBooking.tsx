@@ -1,7 +1,7 @@
 // src/pages/TuteeBooking.tsx
 import { useState, useEffect } from "react";
 import { useAuth } from "@/lib/auth-context";
-import { searchTutors, subscribeUserSessions } from "@/lib/firestore";
+import { searchTutors, subscribeUserSessions, getRecommendedTutors } from "@/lib/firestore";
 import {
   Button, Input, Select, Modal, Toast, Badge, StarRating, Divider,
 } from "@/components/shared/ui";
@@ -22,7 +22,7 @@ const GRADES: { value: GradeLevel; label: string }[] = [
 ];
 import {
   Search, Star, Clock, Video, Calendar, ChevronRight, Filter, User,
-  Repeat, CalendarDays,
+  Repeat, CalendarDays, Sparkles, ArrowUpDown,
 } from "lucide-react";
 import { format } from "date-fns";
 
@@ -63,6 +63,8 @@ function getAvailableDates(slot: AvailabilitySlot): string[] {
   return dates.filter((d) => !cancelled.has(d) && !booked[d]);
 }
 
+type SortMode = "recommended" | "rating" | "availability";
+
 export default function TuteeBooking() {
   const { currentUser } = useAuth();
 
@@ -73,6 +75,11 @@ export default function TuteeBooking() {
   const [tutors, setTutors]     = useState<TutorCardType[]>([]);
   const [searching, setSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
+
+  // AI recommendation state
+  const [sortMode, setSortMode] = useState<SortMode>("recommended");
+  const [aiLoading, setAiLoading]   = useState(false);
+  const [aiPowered, setAiPowered]   = useState(false);
 
   // Sessions
   const [sessions, setSessions] = useState<SessionDoc[]>([]);
@@ -102,15 +109,64 @@ export default function TuteeBooking() {
     if (!currentUser) return;
     setSearching(true);
     setHasSearched(true);
+    setAiPowered(false);
+
     const results = await searchTutors({
-      schoolDomain: currentUser.schoolDomain,
+      schoolDomain: currentUser.schoolDomain!,
       subject: subject || undefined,
       day: day || undefined,
       date: date || undefined,
     });
+
+    // Set raw results first so user sees something immediately
     setTutors(results);
     setSearching(false);
+
+    // Then run AI recommendation in background (if more than 1 tutor)
+    if (results.length > 1) {
+      setAiLoading(true);
+      try {
+        const rec = await getRecommendedTutors(results, {
+          subject: subject || undefined,
+          date: date || undefined,
+          day: day || undefined,
+        });
+
+        // Apply AI scores to tutor cards
+        const scoreMap = new Map(rec.ranked.map((r) => [r.uid, r]));
+        const enriched = results.map((t) => {
+          const match = scoreMap.get(t.uid);
+          return {
+            ...t,
+            aiScore: match?.score ?? 50,
+            aiReason: match?.reason ?? undefined,
+          };
+        });
+
+        setTutors(enriched);
+        setAiPowered(rec.aiPowered);
+      } catch (err) {
+        console.warn("AI recommendation failed, using default order:", err);
+      } finally {
+        setAiLoading(false);
+      }
+    }
   };
+
+  // Sort tutors based on selected mode
+  const sortedTutors = [...tutors].sort((a, b) => {
+    switch (sortMode) {
+      case "recommended":
+        // AI score first, fallback to rating
+        return (b.aiScore ?? 0) - (a.aiScore ?? 0) || b.avgRating - a.avgRating;
+      case "rating":
+        return b.avgRating - a.avgRating || b.reviewCount - a.reviewCount;
+      case "availability":
+        return b.availableSlots.length - a.availableSlots.length;
+      default:
+        return 0;
+    }
+  });
 
   const handleBook = async () => {
     if (!bookModal || !currentUser || !bookingDate) return;
@@ -235,7 +291,7 @@ export default function TuteeBooking() {
       setRateModal(null);
       setStars(0);
       setReviewText("");
-      setToast({ msg: "Rating submitted — thanks!", type: "success" });
+      setToast({ msg: "Rating submitted -- thanks!", type: "success" });
     } catch {
       setToast({ msg: "Failed to submit rating", type: "error" });
     }
@@ -355,7 +411,7 @@ export default function TuteeBooking() {
 
           {/* Results */}
           {searching && (
-            <div className="text-center py-16 text-gray-400 text-sm">Searching…</div>
+            <div className="text-center py-16 text-gray-400 text-sm">Searching...</div>
           )}
 
           {!searching && hasSearched && tutors.length === 0 && (
@@ -367,21 +423,70 @@ export default function TuteeBooking() {
           )}
 
           {!searching && tutors.length > 0 && (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {tutors.map((tutor) => (
-                <TutorCard
-                  key={tutor.uid}
-                  tutor={tutor}
-                  onBook={(slot) => {
-                    const availDates = getAvailableDates(slot);
-                    setBookModal({ tutor, slot });
-                    setBookingSubject(tutor.subjects[0] ?? "");
-                    // Pre-select first available date
-                    setBookingDate(availDates[0] ?? "");
-                  }}
-                />
-              ))}
-            </div>
+            <>
+              {/* Sort controls + AI badge */}
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-gray-500">{tutors.length} tutor{tutors.length !== 1 ? "s" : ""} found</span>
+                  {aiLoading && (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-purple-50 text-purple-600 text-xs font-medium animate-pulse">
+                      <Sparkles className="w-3 h-3" />
+                      AI ranking...
+                    </span>
+                  )}
+                  {!aiLoading && aiPowered && sortMode === "recommended" && (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-purple-50 text-purple-600 text-xs font-medium">
+                      <Sparkles className="w-3 h-3" />
+                      AI Recommended
+                    </span>
+                  )}
+                  {!aiLoading && !aiPowered && tutors.some((t) => t.aiScore !== undefined) && sortMode === "recommended" && (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-gray-100 text-gray-500 text-xs font-medium">
+                      <ArrowUpDown className="w-3 h-3" />
+                      Smart sorted
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
+                  {([
+                    { key: "recommended" as SortMode, label: "Best Match", icon: Sparkles },
+                    { key: "rating" as SortMode, label: "Rating", icon: Star },
+                    { key: "availability" as SortMode, label: "Slots", icon: Calendar },
+                  ]).map(({ key, label, icon: Icon }) => (
+                    <button
+                      key={key}
+                      onClick={() => setSortMode(key)}
+                      className={`flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-medium transition-colors ${
+                        sortMode === key
+                          ? "bg-white text-gray-900 shadow-sm"
+                          : "text-gray-500 hover:text-gray-700"
+                      }`}
+                    >
+                      <Icon className="w-3 h-3" />
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                {sortedTutors.map((tutor, idx) => (
+                  <TutorCard
+                    key={tutor.uid}
+                    tutor={tutor}
+                    rank={sortMode === "recommended" && tutor.aiScore !== undefined ? idx + 1 : undefined}
+                    showAiReason={sortMode === "recommended" && !!tutor.aiReason}
+                    onBook={(slot) => {
+                      const availDates = getAvailableDates(slot);
+                      setBookModal({ tutor, slot });
+                      setBookingSubject(tutor.subjects[0] ?? "");
+                      // Pre-select first available date
+                      setBookingDate(availDates[0] ?? "");
+                    }}
+                  />
+                ))}
+              </div>
+            </>
           )}
 
           {!hasSearched && (
@@ -399,7 +504,7 @@ export default function TuteeBooking() {
           {completed.length > 0 && (
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
               <p className="text-sm font-medium text-amber-800 mb-3">
-                ⭐ You have {completed.length} session{completed.length > 1 ? "s" : ""} to rate
+                You have {completed.length} session{completed.length > 1 ? "s" : ""} to rate
               </p>
               <div className="flex flex-wrap gap-2">
                 {completed.map((s) => (
@@ -408,7 +513,7 @@ export default function TuteeBooking() {
                     onClick={() => { setRateModal(s); setStars(0); }}
                     className="px-3 py-1.5 bg-white border border-amber-200 rounded text-xs font-medium text-amber-700 hover:border-amber-400 transition-colors"
                   >
-                    Rate {s.tutorName} →
+                    Rate {s.tutorName}
                   </button>
                 ))}
               </div>
@@ -474,8 +579,15 @@ export default function TuteeBooking() {
                       <span>{bookModal.slot.date ? format(new Date(bookModal.slot.date + "T12:00:00"), "EEE, MMM d, yyyy") : bookModal.slot.day}</span>
                     </>
                   )}
-                  <span>· {bookModal.slot.startTime}–{bookModal.slot.endTime} ({bookModal.slot.duration} min)</span>
+                  <span>· {bookModal.slot.startTime}--{bookModal.slot.endTime} ({bookModal.slot.duration} min)</span>
                 </div>
+                {/* AI recommendation reason */}
+                {bookModal.tutor.aiReason && (
+                  <div className="mt-2 flex items-start gap-1.5 text-xs text-purple-600">
+                    <Sparkles className="w-3 h-3 mt-0.5 flex-shrink-0" />
+                    <span>{bookModal.tutor.aiReason}</span>
+                  </div>
+                )}
               </div>
 
               {/* Date selection */}
@@ -548,7 +660,7 @@ export default function TuteeBooking() {
             <textarea
               value={reviewText}
               onChange={(e) => setReviewText(e.target.value)}
-              placeholder="Write a review (optional)…"
+              placeholder="Write a review (optional)..."
               className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded resize-none min-h-[80px] focus:outline-none focus:ring-2 focus:ring-brand-500"
             />
             <Divider />
@@ -602,34 +714,66 @@ export default function TuteeBooking() {
 // ── Sub-components ────────────────────────────────────────────────
 
 function TutorCard({
-  tutor, onBook,
+  tutor, onBook, rank, showAiReason,
 }: {
   tutor: TutorCardType;
   onBook: (slot: AvailabilitySlot) => void;
+  rank?: number;
+  showAiReason?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <div className="bg-white border border-gray-200 rounded-lg overflow-hidden hover:border-brand-200 transition-colors">
+    <div className={`bg-white border rounded-lg overflow-hidden transition-colors ${
+      rank === 1 ? "border-purple-200 ring-1 ring-purple-100" : "border-gray-200 hover:border-brand-200"
+    }`}>
       <div className="p-4">
         <div className="flex items-start justify-between mb-3">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-brand-100 flex items-center justify-center text-brand-600 font-semibold text-sm">
-              {tutor.name.charAt(0)}
+            {/* Rank badge or avatar */}
+            <div className="relative">
+              <div className="w-10 h-10 rounded-full bg-brand-100 flex items-center justify-center text-brand-600 font-semibold text-sm">
+                {tutor.name.charAt(0)}
+              </div>
+              {rank !== undefined && rank <= 3 && (
+                <div className={`absolute -top-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                  rank === 1 ? "bg-purple-500 text-white" :
+                  rank === 2 ? "bg-purple-300 text-white" :
+                  "bg-purple-100 text-purple-600"
+                }`}>
+                  {rank}
+                </div>
+              )}
             </div>
             <div>
               <p className="font-medium text-gray-900 text-sm">{tutor.name}</p>
               <p className="text-xs text-gray-500">{tutor.grade}</p>
             </div>
           </div>
-          {tutor.avgRating > 0 && (
-            <div className="flex items-center gap-1">
-              <Star className="w-3 h-3 text-amber-400 fill-amber-400" />
-              <span className="text-xs font-medium text-gray-700">{tutor.avgRating.toFixed(1)}</span>
-              <span className="text-xs text-gray-400">({tutor.reviewCount})</span>
-            </div>
-          )}
+          <div className="flex flex-col items-end gap-1">
+            {tutor.avgRating > 0 && (
+              <div className="flex items-center gap-1">
+                <Star className="w-3 h-3 text-amber-400 fill-amber-400" />
+                <span className="text-xs font-medium text-gray-700">{tutor.avgRating.toFixed(1)}</span>
+                <span className="text-xs text-gray-400">({tutor.reviewCount})</span>
+              </div>
+            )}
+            {tutor.aiScore !== undefined && (
+              <div className="flex items-center gap-1">
+                <Sparkles className="w-3 h-3 text-purple-400" />
+                <span className="text-[10px] font-medium text-purple-500">{tutor.aiScore}% match</span>
+              </div>
+            )}
+          </div>
         </div>
+
+        {/* AI recommendation reason */}
+        {showAiReason && tutor.aiReason && (
+          <div className="flex items-start gap-1.5 mb-3 px-2.5 py-2 bg-purple-50 rounded-md">
+            <Sparkles className="w-3 h-3 text-purple-500 mt-0.5 flex-shrink-0" />
+            <p className="text-xs text-purple-700 leading-relaxed">{tutor.aiReason}</p>
+          </div>
+        )}
 
         {/* Subjects */}
         <div className="flex flex-wrap gap-1 mb-3">
@@ -673,7 +817,7 @@ function TutorCard({
                     ? `Every ${slot.day}`
                     : (slot.date ? format(new Date(slot.date + "T12:00:00"), "EEE, MMM d") : slot.day)}
                 </span>
-                {" · "}{slot.startTime}–{slot.endTime}{" "}
+                {" · "}{slot.startTime}--{slot.endTime}{" "}
                 <span className="text-gray-400">({slot.duration} min)</span>
               </div>
               <Button size="sm" onClick={() => onBook(slot)}>Book</Button>
@@ -711,7 +855,7 @@ function SessionRow({
             <Calendar className="w-3 h-3" />
             {format(session.scheduledDate.toDate(), "EEE, MMM d")}
           </span>
-          <span>{session.startTime}–{session.endTime}</span>
+          <span>{session.startTime}--{session.endTime}</span>
           <span className="flex items-center gap-1">
             <Clock className="w-3 h-3" /> {session.duration} min
           </span>
