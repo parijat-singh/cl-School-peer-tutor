@@ -119,6 +119,9 @@ export default function TutorDashboard() {
   const [stars, setStars]               = useState(0);
   const [reviewText, setReviewText]     = useState("");
   const [selectedSubjects, setSelectedSubjects] = useState<string[]>([]);
+  // Subjects the tutor typed in that aren't in DEFAULT_SUBJECTS
+  const [customSubjects, setCustomSubjects] = useState<string[]>([]);
+  const [customInput, setCustomInput]       = useState("");
 
   // Manage dates modal for recurring slots
   const [manageDatesModal, setManageDatesModal] = useState<AvailabilitySlot | null>(null);
@@ -276,6 +279,25 @@ export default function TutorDashboard() {
     );
   }, []);
 
+  const addCustomSubject = useCallback(() => {
+    const s = customInput.trim();
+    if (!s) return;
+    // Skip if already present (case-insensitive) in either list
+    const allKnown = [...DEFAULT_SUBJECTS, ...customSubjects];
+    if (allKnown.some((x) => x.toLowerCase() === s.toLowerCase())) {
+      setCustomInput("");
+      return;
+    }
+    setCustomSubjects((prev) => [...prev, s]);
+    setSelectedSubjects((prev) => [...prev, s]);
+    setCustomInput("");
+  }, [customInput, customSubjects]);
+
+  const removeCustomSubject = useCallback((s: string) => {
+    setCustomSubjects((prev) => prev.filter((x) => x !== s));
+    setSelectedSubjects((prev) => prev.filter((x) => x !== s));
+  }, []);
+
   const upcoming  = sessions.filter((s) => s.status === "upcoming");
   const completed = sessions.filter((s) => s.status === "completed");
   const unrated   = completed.filter((s) => !s.tutorRated);
@@ -310,7 +332,11 @@ export default function TutorDashboard() {
         <Button onClick={async () => {
           // Load latest subjects + bio from Firestore so the form pre-fills correctly
           const userDoc = await getUserDoc(currentUser!.uid);
-          const saved = userDoc?.subjects ?? [];
+          const saved: string[] = userDoc?.subjects ?? [];
+          // Separate saved subjects into default-list ones and custom (user-added) ones
+          const defaultSet = new Set(DEFAULT_SUBJECTS);
+          setCustomSubjects(saved.filter((s) => !defaultSet.has(s)));
+          setCustomInput("");
           setSelectedSubjects(saved);
           profileForm.reset({
             name: currentUser?.name ?? "",
@@ -719,7 +745,7 @@ export default function TutorDashboard() {
       </Modal>
 
       {/* ── Profile Modal ── */}
-      <Modal open={profileModal} onClose={() => setProfileModal(false)} title="Edit Profile">
+      <Modal open={profileModal} onClose={() => { setProfileModal(false); setCustomSubjects([]); setCustomInput(""); }} title="Edit Profile">
         <form onSubmit={handleSaveProfile} className="flex flex-col gap-4">
           <Input
             label="Name"
@@ -734,6 +760,7 @@ export default function TutorDashboard() {
           <div>
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Subjects</p>
             <div className="flex flex-wrap gap-2">
+              {/* Default subjects — toggle on/off */}
               {DEFAULT_SUBJECTS.map((s) => (
                 <button
                   key={s}
@@ -748,6 +775,52 @@ export default function TutorDashboard() {
                   {s}
                 </button>
               ))}
+              {/* Custom subjects — toggle on/off, × to remove entirely */}
+              {customSubjects.map((s) => {
+                const active = selectedSubjects.includes(s);
+                return (
+                  <span
+                    key={s}
+                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs border transition-colors ${
+                      active
+                        ? "bg-brand-500 border-brand-500 text-white"
+                        : "bg-white border-brand-200 text-brand-700"
+                    }`}
+                  >
+                    <button type="button" onClick={() => toggleSubject(s)} className="focus:outline-none">
+                      {s}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => removeCustomSubject(s)}
+                      title={`Remove "${s}"`}
+                      className={`rounded-full hover:opacity-70 focus:outline-none ${active ? "text-white" : "text-brand-400"}`}
+                    >
+                      <XIcon className="w-3 h-3" />
+                    </button>
+                  </span>
+                );
+              })}
+            </div>
+            {/* Add custom subject input */}
+            <div className="flex gap-2 mt-3">
+              <input
+                type="text"
+                value={customInput}
+                onChange={(e) => setCustomInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addCustomSubject(); } }}
+                placeholder="Add a custom subject or unit…"
+                maxLength={50}
+                className="flex-1 px-3 py-1.5 text-xs border border-gray-200 rounded focus:outline-none focus:ring-2 focus:ring-brand-500"
+              />
+              <button
+                type="button"
+                onClick={addCustomSubject}
+                disabled={!customInput.trim()}
+                className="px-3 py-1.5 text-xs bg-brand-50 border border-brand-200 text-brand-700 rounded hover:bg-brand-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                + Add
+              </button>
             </div>
           </div>
           <Textarea
