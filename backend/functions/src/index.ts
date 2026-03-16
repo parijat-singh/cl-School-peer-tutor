@@ -22,3 +22,4 @@ export { updateTutorProfile }     from "./auth/updateTutorProfile";
 export { recommendTutors }        from "./recommendations/recommendTutors";
 export { sendVerificationOtp }    from "./auth/sendVerificationOtp";
 export { verifyEmailOtp }         from "./auth/verifyEmailOtp";
+export { submitContactForm }      from "./contact/submitContactForm";

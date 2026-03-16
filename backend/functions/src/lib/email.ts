@@ -1,23 +1,22 @@
 // functions/src/lib/email.ts
 // Nodemailer SMTP email helper — all outbound email goes through here.
-// Configured for Outlook SMTP (smtp-mail.outlook.com:587 with STARTTLS).
+// Port 465 → SSL (secure:true). Port 587 → STARTTLS (secure:false).
 
 import * as nodemailer from "nodemailer";
 
 // ── Transport ─────────────────────────────────────────────────────
 
+const SMTP_PORT = Number(process.env.SMTP_PORT ?? "587");
+
 const transport = nodemailer.createTransport({
-  host:   process.env.SMTP_HOST    ?? "smtp-mail.outlook.com",
-  port:   Number(process.env.SMTP_PORT ?? "587"),
-  secure: false, // STARTTLS — upgrade happens after connection
+  host:   process.env.SMTP_HOST ?? "smtp.resend.com",
+  port:   SMTP_PORT,
+  secure: SMTP_PORT === 465,
   auth: {
     user: process.env.SMTP_USER ?? "",
     pass: process.env.SMTP_PASS ?? "",
   },
-  tls: {
-    ciphers: "SSLv3",
-    rejectUnauthorized: false,
-  },
+  tls: { rejectUnauthorized: false },
 });
 
 const FROM_NAME  = process.env.SMTP_FROM_NAME  ?? "PeerTutor";
