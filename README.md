@@ -94,7 +94,7 @@ cl-School-peer-tutor/
 │   │   │   └── types.ts        # Shared TypeScript types
 │   │   ├── pages/
 │   │   │   ├── LandingPage.tsx
-│   │   │   ├── AuthPage.tsx    # Sign-in + Sign-up + COPPA
+│   │   │   ├── AuthPage.tsx    # Sign-in + Sign-up
 │   │   │   ├── TutorDashboard.tsx
 │   │   │   ├── TuteeBooking.tsx
 │   │   │   ├── AdminDashboard.tsx
@@ -218,7 +218,7 @@ docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 | **Cloud Functions for all writes** | Rating, booking, suspension all happen server-side — clients never write sessions or reviews directly |
 | **Google Meet via Calendar API** | Server-side provisioning with 3-retry exponential backoff; graceful degradation if API fails |
 | **SendGrid for email** | Reliable transactional email with template management; `.ics` calendar invites attached |
-| **COPPA gate** | Grade 6/7 → `status: pending_consent` → parental email sent before activation |
+| **All grades welcome** | No age-gating — all students with a valid school email can sign up immediately |
 
 ---
 
@@ -260,9 +260,7 @@ firebase functions:log
 ## Open Items Before Production
 
 - [ ] Provision real Firebase project and update `.env`
-- [ ] Create SendGrid account and build email templates (6 templates needed)
+- [ ] Create SendGrid account and build email templates (5 templates needed)
 - [ ] Create Google Cloud service account with Calendar API + domain-wide delegation
-- [ ] Legal review of COPPA parental consent email template
-- [ ] Implement parental consent token/link flow in `registerSchool.ts`
 - [ ] Onboard 2 pilot schools via `registerSchool` callable + ops approval
 - [ ] Set up Firebase Hosting + GitHub Actions CI/CD

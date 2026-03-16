@@ -3,12 +3,15 @@
 
 import {
   collection, doc, query, where, orderBy, limit,
-  getDocs, getDoc, onSnapshot, runTransaction,
+  getDocs, getDoc, onSnapshot,
   serverTimestamp, updateDoc, deleteDoc, addDoc,
   type QueryConstraint,
   type Unsubscribe,
 } from "firebase/firestore";
-import { db } from "./firebase";
+import { httpsCallable } from "firebase/functions";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { db, storage } from "./firebase";
+import { fns } from "./firebase";
 import type {
   UserDoc, AvailabilitySlot, SessionDoc, ReviewDoc,
   SchoolDoc, StatsDoc, TutorCard,
@@ -42,6 +45,7 @@ export async function searchTutors(params: {
   schoolDomain: string;
   subject?: string;
   day?: string;
+  date?: string;           // "YYYY-MM-DD" — filter by specific date
 }): Promise<TutorCard[]> {
   const constraints: QueryConstraint[] = [
     where("schoolDomain", "==", params.schoolDomain),
@@ -59,13 +63,45 @@ export async function searchTutors(params: {
   for (const userSnap of snap.docs) {
     const user = { uid: userSnap.id, ...userSnap.data() } as UserDoc;
 
-    // Fetch availability slots
-    const slotConstraints: QueryConstraint[] = [where("booked", "==", false)];
+    // Fetch all availability slots (we filter client-side for complex logic)
+    const slotConstraints: QueryConstraint[] = [];
     if (params.day) slotConstraints.push(where("day", "==", params.day));
     const slotSnap = await getDocs(query(availCol(user.uid), ...slotConstraints));
-    const slots = slotSnap.docs.map(
+    const allSlots = slotSnap.docs.map(
       (s) => ({ id: s.id, ...s.data() } as AvailabilitySlot)
     );
+
+    // Filter to available slots only
+    const today = new Date().toISOString().split("T")[0];
+    const slots = allSlots.filter((slot) => {
+      if (slot.recurring) {
+        // Recurring: has at least one available date in next 4 weeks
+        const cancelled = slot.cancelledDates ?? [];
+        const booked = slot.bookedDates ?? {};
+        // If filtering by specific date, check that date
+        if (params.date) {
+          return !cancelled.includes(params.date) && !booked[params.date];
+        }
+        // Otherwise check if any date in next 4 weeks is available
+        const dayNames = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+        const dayIdx = dayNames.indexOf(slot.day);
+        const now = new Date();
+        for (let w = 0; w < 4; w++) {
+          const d = new Date(now);
+          const diff = (dayIdx - d.getDay() + 7) % 7 || 7;
+          d.setDate(d.getDate() + diff + w * 7);
+          const ds = d.toISOString().split("T")[0];
+          if (!cancelled.includes(ds) && !booked[ds]) return true;
+        }
+        return false;
+      } else {
+        // One-off: not booked and date is in the future
+        if (slot.booked) return false;
+        if (slot.date && slot.date < today) return false;
+        if (params.date && slot.date !== params.date) return false;
+        return true;
+      }
+    });
 
     // Only include tutors with open slots
     if (slots.length > 0) {
@@ -100,15 +136,60 @@ export async function addAvailabilitySlot(
   tutorUid: string,
   slot: Omit<AvailabilitySlot, "id" | "booked" | "createdAt">
 ) {
-  return addDoc(availCol(tutorUid), {
-    ...slot,
-    booked: false,
-    createdAt: serverTimestamp(),
-  });
+  // Build the doc without any undefined fields (Firestore rejects undefined values)
+  const slotData: Record<string, unknown> = { ...slot, booked: false, createdAt: serverTimestamp() };
+  // Remove any undefined fields carried in from the caller (e.g. date, bookedDates, cancelledDates)
+  for (const key of Object.keys(slotData)) {
+    if (slotData[key] === undefined) delete slotData[key];
+  }
+  // Recurring slots always carry bookedDates / cancelledDates maps; specific-date slots do not
+  if (slot.recurring) {
+    slotData.bookedDates     = (slot as AvailabilitySlot).bookedDates     ?? {};
+    slotData.cancelledDates  = (slot as AvailabilitySlot).cancelledDates  ?? [];
+  }
+  return addDoc(availCol(tutorUid), slotData);
 }
 
 export async function removeAvailabilitySlot(tutorUid: string, slotId: string) {
   return deleteDoc(doc(db, "users", tutorUid, "availability", slotId));
+}
+
+export async function updateAvailabilitySlot(
+  tutorUid: string,
+  slotId: string,
+  updates: Partial<Pick<AvailabilitySlot, "startTime" | "endTime" | "duration" | "cancelledDates" | "bookedDates">>
+) {
+  return updateDoc(doc(db, "users", tutorUid, "availability", slotId), updates);
+}
+
+/** Cancel a specific date occurrence of a recurring slot */
+export async function cancelRecurringDate(
+  tutorUid: string,
+  slotId: string,
+  date: string
+) {
+  const slotRef = doc(db, "users", tutorUid, "availability", slotId);
+  const snap = await getDoc(slotRef);
+  if (!snap.exists()) return;
+  const data = snap.data();
+  const cancelled = data.cancelledDates ?? [];
+  if (!cancelled.includes(date)) {
+    await updateDoc(slotRef, { cancelledDates: [...cancelled, date] });
+  }
+}
+
+/** Uncancel a specific date occurrence of a recurring slot */
+export async function uncancelRecurringDate(
+  tutorUid: string,
+  slotId: string,
+  date: string
+) {
+  const slotRef = doc(db, "users", tutorUid, "availability", slotId);
+  const snap = await getDoc(slotRef);
+  if (!snap.exists()) return;
+  const data = snap.data();
+  const cancelled = (data.cancelledDates ?? []).filter((d: string) => d !== date);
+  await updateDoc(slotRef, { cancelledDates: cancelled });
 }
 
 // ── Sessions ─────────────────────────────────────────────────────
@@ -168,6 +249,23 @@ export async function getSchoolDoc(domain: string): Promise<SchoolDoc | null> {
   return snap.exists() ? (snap.data() as SchoolDoc) : null;
 }
 
+export async function uploadSchoolLogo(domain: string, file: File): Promise<string> {
+  const ext = file.name.split(".").pop() ?? "png";
+  const storageRef = ref(storage, `schools/${domain}/logo.${ext}`);
+  await uploadBytes(storageRef, file, { contentType: file.type });
+  const url = await getDownloadURL(storageRef);
+  // Update school doc with the new logo URL
+  await updateDoc(doc(db, "schools", domain), { logoUrl: url });
+  return url;
+}
+
+export async function updateSchoolProfile(
+  domain: string,
+  updates: { name?: string; campus?: string; brandColor?: string }
+) {
+  await updateDoc(doc(db, "schools", domain), updates);
+}
+
 // ── Stats ────────────────────────────────────────────────────────
 
 export function subscribeStats(
@@ -183,4 +281,62 @@ export function subscribeStats(
 
 export async function flagReview(reviewId: string, flaggedBy: string) {
   return updateDoc(doc(db, "reviews", reviewId), { flagged: true, flaggedBy });
+}
+
+// ── Super Admin queries ──────────────────────────────────────────
+
+export function subscribeAllSchools(cb: (schools: SchoolDoc[]) => void): Unsubscribe {
+  const q = query(schoolsCol(), orderBy("domain"));
+  return onSnapshot(q, (snap) => {
+    cb(snap.docs.map((d) => d.data() as SchoolDoc));
+  });
+}
+
+export function subscribeAllSuperAdmins(cb: (users: UserDoc[]) => void): Unsubscribe {
+  const q = query(usersCol(), where("role", "==", "superadmin"));
+  return onSnapshot(q, (snap) => {
+    cb(snap.docs.map((d) => ({ uid: d.id, ...d.data() } as UserDoc)));
+  });
+}
+
+// ── AI Recommendation Engine ─────────────────────────────────
+
+export interface TutorRecommendation {
+  uid: string;
+  reason: string;
+  score: number;
+}
+
+export interface RecommendationResult {
+  ranked: TutorRecommendation[];
+  aiPowered: boolean;
+}
+
+export async function getRecommendedTutors(
+  tutors: TutorCard[],
+  searchContext: { subject?: string; date?: string; day?: string }
+): Promise<RecommendationResult> {
+  const fn = httpsCallable<unknown, RecommendationResult>(fns, "recommendTutors");
+
+  const tutorInputs = tutors.map((t) => ({
+    uid: t.uid,
+    name: t.name,
+    grade: t.grade,
+    subjects: t.subjects,
+    bio: t.bio,
+    avgRating: t.avgRating,
+    reviewCount: t.reviewCount,
+    slotCount: t.availableSlots.length,
+    hasRecurringSlots: t.availableSlots.some((s) => s.recurring),
+    hasDateSlots: t.availableSlots.some((s) => !s.recurring),
+  }));
+
+  const result = await fn({
+    tutors: tutorInputs,
+    searchSubject: searchContext.subject,
+    searchDate: searchContext.date,
+    searchDay: searchContext.day,
+  });
+
+  return result.data;
 }

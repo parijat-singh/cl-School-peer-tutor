@@ -273,16 +273,18 @@ export function StarRating({ value, onChange, size = "md" }: StarRatingProps) {
 
 interface BadgeProps {
   children: React.ReactNode;
-  color?: "blue" | "green" | "red" | "amber" | "gray";
+  color?: "blue" | "green" | "red" | "amber" | "gray" | "purple" | "indigo";
 }
 
 export function Badge({ children, color = "blue" }: BadgeProps) {
   const colors = {
-    blue:  "bg-blue-50 text-blue-700 border-blue-100",
-    green: "bg-green-50 text-green-700 border-green-100",
-    red:   "bg-red-50 text-red-700 border-red-100",
-    amber: "bg-amber-50 text-amber-700 border-amber-100",
-    gray:  "bg-gray-100 text-gray-600 border-gray-200",
+    blue:   "bg-blue-50 text-blue-700 border-blue-100",
+    green:  "bg-green-50 text-green-700 border-green-100",
+    red:    "bg-red-50 text-red-700 border-red-100",
+    amber:  "bg-amber-50 text-amber-700 border-amber-100",
+    gray:   "bg-gray-100 text-gray-600 border-gray-200",
+    purple: "bg-purple-50 text-purple-700 border-purple-100",
+    indigo: "bg-indigo-50 text-indigo-700 border-indigo-100",
   };
   return (
     <span className={clsx("inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border", colors[color])}>

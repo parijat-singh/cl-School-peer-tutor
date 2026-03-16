@@ -2,6 +2,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Suspense, lazy } from "react";
 import { AuthProvider, useAuth } from "@/lib/auth-context";
+import { SchoolProvider } from "@/lib/school-context";
 import { Layout } from "@/components/shared/Layout";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ProtectedRoute } from "@/components/shared/ProtectedRoute";
@@ -15,6 +16,8 @@ const TutorProfile    = lazy(() => import("@/pages/TutorProfile"));
 const AdminDashboard  = lazy(() => import("@/pages/AdminDashboard"));
 const RateSession     = lazy(() => import("@/pages/RateSession"));
 const OnboardRole     = lazy(() => import("@/pages/OnboardRole"));
+const SuperAdminDashboard = lazy(() => import("@/pages/SuperAdminDashboard"));
+const TeacherHome     = lazy(() => import("@/pages/TeacherHome"));
 const NotFound        = lazy(() => import("@/pages/NotFound"));
 
 function AppRoutes() {
@@ -81,30 +84,33 @@ function AppRoutes() {
             }
           />
 
-          {/* Admin */}
+          {/* School Admin */}
           <Route
             path="admin"
             element={
-              <ProtectedRoute roles={["admin"]}>
+              <ProtectedRoute roles={["schooladmin"]}>
                 <AdminDashboard />
               </ProtectedRoute>
             }
           />
 
-          {/* Convenience redirect */}
+          {/* Super Admin */}
           <Route
-            path="dashboard"
+            path="superadmin"
             element={
-              <Navigate
-                to={
-                  currentUser?.role === "admin"
-                    ? "/admin"
-                    : currentUser?.role === "tutee"
-                    ? "/find"
-                    : "/dashboard"
-                }
-                replace
-              />
+              <ProtectedRoute roles={["superadmin"]}>
+                <SuperAdminDashboard />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Teacher */}
+          <Route
+            path="teacher"
+            element={
+              <ProtectedRoute roles={["teacher"]}>
+                <TeacherHome />
+              </ProtectedRoute>
             }
           />
 
@@ -119,7 +125,9 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <AppRoutes />
+        <SchoolProvider>
+          <AppRoutes />
+        </SchoolProvider>
       </AuthProvider>
     </BrowserRouter>
   );

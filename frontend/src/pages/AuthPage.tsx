@@ -17,15 +17,21 @@ const signInSchema = z.object({
 });
 
 const signUpSchema = z.object({
-  name:     z.string().min(2, "Name must be at least 2 characters"),
-  email:    z.string().email("Enter a valid email")
-              .refine(validateSchoolEmail, "Must be a school email (.edu or .k12)"),
-  password: z.string().min(8, "Password must be at least 8 characters")
-              .regex(/[A-Z]/, "Must contain an uppercase letter")
-              .regex(/[0-9]/, "Must contain a number"),
-  grade:    z.string().min(1, "Select your grade") as z.ZodType<GradeLevel>,
-  role:     z.enum(["tutor", "tutee", "both"]) as z.ZodType<Exclude<UserRole, "admin">>,
-  parentEmail: z.string().email("Enter a valid email").optional().or(z.literal("")),
+  name:            z.string().min(2, "Name must be at least 2 characters"),
+  email:           z.string().email("Enter a valid email")
+                     .refine(validateSchoolEmail, "Must be a school email (.edu or .k12)"),
+  password:        z.string().min(8, "Password must be at least 8 characters")
+                     .regex(/[A-Z]/, "Must contain an uppercase letter")
+                     .regex(/[0-9]/, "Must contain a number"),
+  confirmPassword: z.string().min(1, "Please confirm your password"),
+  grade:           z.string().optional() as z.ZodType<GradeLevel | undefined>,
+  role:            z.enum(["tutor", "tutee", "both", "teacher"]) as z.ZodType<Exclude<UserRole, "schooladmin" | "superadmin">>,
+}).refine((data) => data.role === "teacher" || (data.grade && data.grade.length > 0), {
+  message: "Select your grade",
+  path: ["grade"],
+}).refine((data) => data.password === data.confirmPassword, {
+  message: "Passwords do not match",
+  path: ["confirmPassword"],
 });
 
 type SignInForm = z.infer<typeof signInSchema>;
@@ -56,9 +62,6 @@ export default function AuthPage() {
   const signInForm = useForm<SignInForm>({ resolver: zodResolver(signInSchema) });
   const signUpForm = useForm<SignUpForm>({ resolver: zodResolver(signUpSchema) });
 
-  const watchedGrade = signUpForm.watch("grade");
-  const needsParentEmail = watchedGrade === "6th" || watchedGrade === "7th";
-
   const handleSignIn = signInForm.handleSubmit(async (data) => {
     setServerError("");
     try {
@@ -81,16 +84,16 @@ export default function AuthPage() {
         email:    data.email,
         password: data.password,
         name:     data.name,
-        grade:    data.grade as GradeLevel,
+        grade:    data.role === "teacher" ? null : (data.grade as GradeLevel),
         role:     data.role as UserRole,
       });
-      navigate("/dashboard");
+      navigate(data.role === "teacher" ? "/teacher" : "/dashboard");
     } catch (err: unknown) {
       const msg = (err as Error).message ?? "";
       setServerError(
         msg.includes("email-already-in-use")
           ? "An account with this email already exists."
-          : msg.includes("school email")
+          : msg.includes("school") || msg.includes("pending")
           ? msg
           : "Sign up failed. Please try again."
       );
@@ -225,8 +228,27 @@ export default function AuthPage() {
                 error={signUpForm.formState.errors.password?.message}
                 {...signUpForm.register("password")}
               />
+              <Input
+                label="Confirm Password"
+                type="password"
+                placeholder="••••••••"
+                error={signUpForm.formState.errors.confirmPassword?.message}
+                {...signUpForm.register("confirmPassword")}
+              />
 
-              <div className="grid grid-cols-2 gap-3">
+              <Select
+                label="I am a"
+                options={[
+                  { value: "tutee",   label: "Student - Find a tutor" },
+                  { value: "tutor",   label: "Student - Be a tutor" },
+                  { value: "both",    label: "Student - Both" },
+                  { value: "teacher", label: "Teacher" },
+                ]}
+                error={signUpForm.formState.errors.role?.message}
+                {...signUpForm.register("role")}
+              />
+
+              {signUpForm.watch("role") !== "teacher" && (
                 <Select
                   label="Grade"
                   placeholder="Select grade"
@@ -234,33 +256,6 @@ export default function AuthPage() {
                   error={signUpForm.formState.errors.grade?.message}
                   {...signUpForm.register("grade")}
                 />
-                <Select
-                  label="I want to"
-                  options={[
-                    { value: "tutee", label: "Find a tutor" },
-                    { value: "tutor", label: "Be a tutor" },
-                    { value: "both",  label: "Both" },
-                  ]}
-                  error={signUpForm.formState.errors.role?.message}
-                  {...signUpForm.register("role")}
-                />
-              </div>
-
-              {/* COPPA consent notice */}
-              {needsParentEmail && (
-                <div className="bg-amber-50 border border-amber-200 rounded p-3 text-xs text-amber-800">
-                  <strong>Parental consent required.</strong> Because you are in 6th or 7th grade,
-                  we will email a consent request to your parent or guardian before activating your account.
-                  <div className="mt-2">
-                    <Input
-                      label="Parent / Guardian Email"
-                      type="email"
-                      placeholder="parent@example.com"
-                      error={signUpForm.formState.errors.parentEmail?.message}
-                      {...signUpForm.register("parentEmail")}
-                    />
-                  </div>
-                </div>
               )}
 
               <p className="text-xs text-gray-400">

@@ -50,17 +50,25 @@ export const registerSchool = functions.onCall(
       createdAt: FieldValue.serverTimestamp(),
     });
 
-    // Notify ops team
-    const superAdmin = process.env.SUPER_ADMIN_EMAIL ?? "admin@peertutor.app";
+    // Notify all super admins
     try {
-      await sgMail.send({
-        to:      superAdmin,
-        from:    { email: "noreply@peertutor.app", name: "PeerTutor" },
-        subject: `New school registration: ${name} (${domain})`,
-        text:    `School: ${name}\nDomain: ${domain}\nType: ${type}\nAdmin: ${adminEmail}\n\nApprove at: https://admin.peertutor.app/schools/${domain}`,
-      });
+      const superAdmins = await db.collection("users")
+        .where("role", "==", "superadmin")
+        .get();
+      const emails = superAdmins.docs
+        .map((d) => d.data().email)
+        .filter(Boolean);
+
+      if (emails.length > 0) {
+        await sgMail.send({
+          to:      emails,
+          from:    { email: "noreply@peertutor.app", name: "PeerTutor" },
+          subject: `New school registration: ${name} (${domain})`,
+          text:    `School: ${name}\nDomain: ${domain}\nType: ${type}\nAdmin: ${adminEmail}\n\nApprove in the Super Admin dashboard.`,
+        });
+      }
     } catch (err) {
-      console.error("Ops notification email failed:", err);
+      console.error("Super admin notification email failed:", err);
     }
 
     return {

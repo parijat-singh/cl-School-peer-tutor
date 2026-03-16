@@ -1,11 +1,14 @@
 // src/components/shared/Layout.tsx
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth-context";
+import { useSchool } from "@/lib/school-context";
 import { useState } from "react";
-import { LogOut, BookOpen, LayoutDashboard, Shield, Search, Menu, X } from "lucide-react";
+import type React from "react";
+import { LogOut, BookOpen, LayoutDashboard, Shield, Search, Menu, X, GraduationCap } from "lucide-react";
 
 export function Layout() {
   const { currentUser, logOut } = useAuth();
+  const { school } = useSchool();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -14,16 +17,21 @@ export function Layout() {
     navigate("/");
   };
 
-  const navLinks = currentUser
-    ? currentUser.role === "admin"
+  type NavLink = { to: string; label: string; Icon: React.ElementType; state?: Record<string, unknown> };
+  const navLinks: NavLink[] = currentUser
+    ? currentUser.role === "superadmin"
+      ? [{ to: "/superadmin", label: "Super Admin", Icon: Shield }]
+      : currentUser.role === "schooladmin"
       ? [{ to: "/admin", label: "Admin Panel", Icon: Shield }]
+      : currentUser.role === "teacher"
+      ? [{ to: "/teacher", label: "Teacher Home", Icon: LayoutDashboard }]
       : currentUser.role === "tutee"
-      ? [{ to: "/find", label: "Find Tutors", Icon: Search }]
+      ? [{ to: "/find", label: "Find Tutors", Icon: Search, state: { tab: "search" } }]
       : currentUser.role === "tutor"
       ? [{ to: "/dashboard", label: "Dashboard", Icon: LayoutDashboard }]
       : [
           { to: "/dashboard", label: "Tutor Dashboard", Icon: LayoutDashboard },
-          { to: "/find",      label: "Find Tutors",     Icon: Search },
+          { to: "/find",      label: "Find Tutors",     Icon: Search, state: { tab: "search" } },
         ]
     : [];
 
@@ -33,20 +41,38 @@ export function Layout() {
       <nav className="sticky top-0 z-50 bg-white border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-14">
-            {/* Logo */}
+            {/* Logo — school branded when logged in */}
             <NavLink to="/" className="flex items-center gap-2.5">
-              <div className="w-7 h-7 rounded bg-brand-500 flex items-center justify-center">
-                <BookOpen className="w-4 h-4 text-white" />
-              </div>
-              <span className="font-display text-lg text-gray-900">PeerTutor</span>
+              {currentUser && school?.logoUrl ? (
+                <img
+                  src={school.logoUrl}
+                  alt={`${school.name} logo`}
+                  className="h-7 w-auto object-contain"
+                />
+              ) : currentUser && school ? (
+                <div
+                  className="w-7 h-7 rounded flex items-center justify-center"
+                  style={{ backgroundColor: school.brandColor || "#0055FF" }}
+                >
+                  <GraduationCap className="w-4 h-4 text-white" />
+                </div>
+              ) : (
+                <div className="w-7 h-7 rounded bg-brand-500 flex items-center justify-center">
+                  <BookOpen className="w-4 h-4 text-white" />
+                </div>
+              )}
+              <span className="font-display text-lg text-gray-900">
+                {currentUser && school ? school.name : "PeerTutor"}
+              </span>
             </NavLink>
 
             {/* Desktop links */}
             <div className="hidden md:flex items-center gap-1">
-              {navLinks.map(({ to, label, Icon }) => (
+              {navLinks.map(({ to, label, Icon, state }) => (
                 <NavLink
                   key={to}
                   to={to}
+                  state={state}
                   className={({ isActive }) =>
                     `flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium transition-colors ${
                       isActive
@@ -113,10 +139,11 @@ export function Layout() {
         {/* Mobile nav */}
         {mobileOpen && (
           <div className="md:hidden border-t border-gray-100 px-4 py-3 flex flex-col gap-1">
-            {navLinks.map(({ to, label, Icon }) => (
+            {navLinks.map(({ to, label, Icon, state }) => (
               <NavLink
                 key={to}
                 to={to}
+                state={state}
                 onClick={() => setMobileOpen(false)}
                 className={({ isActive }) =>
                   `flex items-center gap-2 px-3 py-2 rounded text-sm font-medium ${

@@ -6,7 +6,10 @@ export const adminDeleteReview = functions.onCall(
   { region: "us-central1" },
   async (request) => {
     if (!request.auth) throw new functions.HttpsError("unauthenticated", "Sign in required.");
-    if (request.auth.token.role !== "admin") throw new functions.HttpsError("permission-denied", "Admins only.");
+    const callerRole = request.auth.token.role;
+    if (!["schooladmin", "superadmin"].includes(callerRole)) {
+      throw new functions.HttpsError("permission-denied", "Admins only.");
+    }
 
     const { reviewId, reason } = request.data as { reviewId: string; reason: string };
     if (!reviewId || !reason) throw new functions.HttpsError("invalid-argument", "reviewId and reason required.");
@@ -15,8 +18,8 @@ export const adminDeleteReview = functions.onCall(
     if (!reviewSnap.exists) throw new functions.HttpsError("not-found", "Review not found.");
 
     const review = reviewSnap.data()!;
-    // Enforce school isolation
-    if (review.schoolDomain !== request.auth.token.schoolDomain) {
+    // School admins can only act within their school; super admins have cross-school access
+    if (callerRole === "schooladmin" && review.schoolDomain !== request.auth.token.schoolDomain) {
       throw new functions.HttpsError("permission-denied", "Cross-school action denied.");
     }
 

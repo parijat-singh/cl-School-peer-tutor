@@ -1,15 +1,32 @@
 // src/pages/TuteeBooking.tsx
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
+import { useLocation } from "react-router-dom";
 import { useAuth } from "@/lib/auth-context";
-import { searchTutors, subscribeUserSessions } from "@/lib/firestore";
-import { bookSession, cancelSession, submitRating } from "@/lib/functions";
+import { useSchool } from "@/lib/school-context";
+import { SchoolBanner } from "@/components/shared/SchoolBanner";
+import { CalendarGrid, type CalendarDot } from "@/components/shared/CalendarGrid";
+import { searchTutors, subscribeUserSessions, getRecommendedTutors } from "@/lib/firestore";
 import {
-  Button, Select, Modal, Toast, Badge, StarRating, Divider,
+  Button, Input, Select, Modal, Toast, Badge, StarRating, Divider,
 } from "@/components/shared/ui";
-import type { TutorCard, AvailabilitySlot, SessionDoc } from "@/lib/types";
+import type { TutorCard as TutorCardType, AvailabilitySlot, SessionDoc, GradeLevel } from "@/lib/types";
 import { DAYS_OF_WEEK } from "@/lib/types";
+import { doc, updateDoc, addDoc, collection, serverTimestamp, Timestamp } from "firebase/firestore";
+import { db } from "@/lib/firebase";
+import { getUserDoc } from "@/lib/firestore";
+
+const GRADES: { value: GradeLevel; label: string }[] = [
+  { value: "6th",  label: "6th Grade"  },
+  { value: "7th",  label: "7th Grade"  },
+  { value: "8th",  label: "8th Grade"  },
+  { value: "9th",  label: "9th Grade"  },
+  { value: "10th", label: "10th Grade" },
+  { value: "11th", label: "11th Grade" },
+  { value: "12th", label: "12th Grade" },
+];
 import {
   Search, Star, Clock, Video, Calendar, ChevronRight, Filter, User,
+  Repeat, CalendarDays, Sparkles, ArrowUpDown,
 } from "lucide-react";
 import { format } from "date-fns";
 
@@ -19,29 +36,128 @@ const DEFAULT_SUBJECTS = [
   "English","History","Spanish","French","Computer Science","Economics",
 ];
 
+/** Get next N occurrences of a day-of-week starting from tomorrow */
+function getUpcomingDatesForDay(day: string, weeks = 4): string[] {
+  const dayNames = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+  const dayIdx = dayNames.indexOf(day);
+  if (dayIdx < 0) return [];
+  const dates: string[] = [];
+  const now = new Date();
+  const diff = (dayIdx - now.getDay() + 7) % 7 || 7;
+  for (let w = 0; w < weeks; w++) {
+    const d = new Date(now);
+    d.setDate(now.getDate() + diff + w * 7);
+    dates.push(d.toISOString().split("T")[0]);
+  }
+  return dates;
+}
+
+/** Get available dates for a slot (filtering out booked and cancelled) */
+function getAvailableDates(slot: AvailabilitySlot): string[] {
+  if (!slot.recurring) {
+    // One-off: just return the date if not booked and in the future
+    const today = new Date().toISOString().split("T")[0];
+    if (slot.booked || !slot.date || slot.date < today) return [];
+    return [slot.date];
+  }
+  // Recurring: next 4 weeks minus cancelled/booked
+  const dates = getUpcomingDatesForDay(slot.day);
+  const cancelled = new Set(slot.cancelledDates ?? []);
+  const booked = slot.bookedDates ?? {};
+  return dates.filter((d) => !cancelled.has(d) && !booked[d]);
+}
+
+type SortMode = "recommended" | "rating" | "availability";
+
+/**
+ * Returns DEFAULT_SUBJECTS entries that closely match the user's raw input.
+ * Priority: exact → subject-contains-query → query-contains-subject → word-overlap.
+ */
+function findClosestSubjects(input: string): string[] {
+  const q = input.trim().toLowerCase();
+  if (!q) return [];
+
+  const exact = DEFAULT_SUBJECTS.filter((s) => s.toLowerCase() === q);
+  if (exact.length) return exact;
+
+  // "sat" → "SAT Prep", "calc" → "Calculus" / "Pre-Calculus"
+  const subMatch = DEFAULT_SUBJECTS.filter((s) => s.toLowerCase().includes(q));
+  if (subMatch.length) return subMatch;
+
+  // user typed "calculus ab" → matches "Calculus"
+  const revMatch = DEFAULT_SUBJECTS.filter((s) => q.includes(s.toLowerCase()));
+  if (revMatch.length) return revMatch;
+
+  // word-level overlap: any query word starts-with or is started-by a subject word
+  const qWords = q.split(/\s+/).filter(Boolean);
+  return DEFAULT_SUBJECTS.filter((s) => {
+    const sWords = s.toLowerCase().split(/\s+/);
+    return qWords.some((qw) => sWords.some((sw) => sw.startsWith(qw) || qw.startsWith(sw)));
+  });
+}
+
+/** True if any of a tutor's subjects is a case-insensitive partial match for the query */
+function tutorMatchesSubject(subjects: string[], query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return subjects.some((s) => {
+    const sl = s.toLowerCase();
+    return sl === q || sl.includes(q) || q.includes(sl);
+  });
+}
+
 export default function TuteeBooking() {
   const { currentUser } = useAuth();
+  const { school } = useSchool();
 
   // Search state
   const [subject, setSubject]   = useState("");
   const [day, setDay]           = useState("");
-  const [tutors, setTutors]     = useState<TutorCard[]>([]);
+  const [date, setDate]         = useState("");
+  const [nameFilter, setNameFilter] = useState("");
+  const [tutors, setTutors]     = useState<TutorCardType[]>([]);
   const [searching, setSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
 
+  // AI recommendation state
+  const [sortMode, setSortMode] = useState<SortMode>("recommended");
+  const [aiLoading, setAiLoading]   = useState(false);
+  const [aiPowered, setAiPowered]   = useState(false);
+  const [fuzzyNote, setFuzzyNote]   = useState<string | null>(null);
+
   // Sessions
   const [sessions, setSessions] = useState<SessionDoc[]>([]);
-  const [tab, setTab]           = useState<"search" | "sessions">("search");
+  const [tab, setTab]           = useState<"search" | "sessions" | "calendar">("search");
+
+  // Switch to the tab specified in nav-link location state (e.g. Find Tutors → search)
+  const location = useLocation();
+  useEffect(() => {
+    const locState = location.state as { tab?: string } | null;
+    if (locState?.tab === "search" || locState?.tab === "calendar" || locState?.tab === "sessions") {
+      setTab(locState.tab);
+    }
+  }, [location.key]); // location.key changes on every navigation, even same-path
+
+  // Calendar state
+  const [calYear,  setCalYear]  = useState(() => new Date().getFullYear());
+  const [calMonth, setCalMonth] = useState(() => new Date().getMonth());
+  const [calSelected, setCalSelected] = useState<string | null>(null);
+  const [calTutors,  setCalTutors]    = useState<TutorCardType[]>([]);
+  const [calLoading, setCalLoading]   = useState(false);
 
   // Modals
-  const [bookModal, setBookModal]     = useState<{ tutor: TutorCard; slot: AvailabilitySlot } | null>(null);
+  const [bookModal, setBookModal]     = useState<{ tutor: TutorCardType; slot: AvailabilitySlot } | null>(null);
   const [rateModal, setRateModal]     = useState<SessionDoc | null>(null);
   const [cancelModal, setCancelModal] = useState<SessionDoc | null>(null);
   const [bookingSubject, setBookingSubject] = useState("");
+  const [bookingDate, setBookingDate] = useState("");
 
   // Rating
   const [stars, setStars]       = useState(0);
   const [reviewText, setReviewText] = useState("");
+
+  // Booking in-flight guard
+  const [booking, setBooking] = useState(false);
 
   // Toast
   const [toast, setToast] = useState<{ msg: string; type: "success"|"error" } | null>(null);
@@ -52,53 +168,301 @@ export default function TuteeBooking() {
     return unsub;
   }, [currentUser]);
 
+  // Load all tutors when calendar tab is first opened
+  useEffect(() => {
+    if (tab !== "calendar" || !currentUser?.schoolDomain || calTutors.length > 0) return;
+    setCalLoading(true);
+    searchTutors({ schoolDomain: currentUser.schoolDomain })
+      .then(setCalTutors)
+      .finally(() => setCalLoading(false));
+  }, [tab, currentUser?.schoolDomain, calTutors.length]);
+
+  const changeCalMonth = useCallback((dir: 1 | -1) => {
+    setCalMonth((m) => {
+      const next = m + dir;
+      if (next < 0)  { setCalYear((y) => y - 1); return 11; }
+      if (next > 11) { setCalYear((y) => y + 1); return 0; }
+      return next;
+    });
+  }, []);
+
+  /** Build event dots: green = available tutor slots, blue = my sessions */
+  const calendarDots = useMemo<Record<string, CalendarDot[]>>(() => {
+    const result: Record<string, CalendarDot[]> = {};
+    const push = (date: string, dot: CalendarDot) => {
+      result[date] = [...(result[date] ?? []), dot];
+    };
+
+    // Available slots from all tutors
+    calTutors.forEach((tutor) => {
+      tutor.availableSlots.forEach((slot) => {
+        getAvailableDates(slot).forEach((d) => {
+          // Only add one green dot per tutor per day to avoid clutter
+          if (!(result[d] ?? []).some((x) => x.color === "green" && x.label === tutor.name)) {
+            push(d, { color: "green", label: tutor.name });
+          }
+        });
+      });
+    });
+
+    // My booked sessions
+    sessions.filter((s) => s.status === "upcoming").forEach((s) => {
+      const d = s.scheduledDate.toDate().toISOString().split("T")[0];
+      push(d, { color: "blue", label: s.tutorName });
+    });
+
+    return result;
+  }, [calTutors, sessions]);
+
+  /** Tutors who have available slots on the selected calendar day */
+  const calDayTutors = useMemo(() => {
+    if (!calSelected) return [];
+    return calTutors
+      .map((tutor) => ({
+        tutor,
+        slots: tutor.availableSlots.filter((slot) =>
+          getAvailableDates(slot).includes(calSelected)
+        ),
+      }))
+      .filter(({ slots }) => slots.length > 0);
+  }, [calSelected, calTutors]);
+
+  /** My sessions on the selected calendar day */
+  const calDaySessions = useMemo(() => {
+    if (!calSelected) return [];
+    return sessions.filter(
+      (s) => s.scheduledDate.toDate().toISOString().split("T")[0] === calSelected
+    );
+  }, [calSelected, sessions]);
+
   const handleSearch = async () => {
     if (!currentUser) return;
     setSearching(true);
     setHasSearched(true);
-    const results = await searchTutors({
-      schoolDomain: currentUser.schoolDomain,
+    setAiPowered(false);
+    setFuzzyNote(null);
+
+    // ── Stage 1: exact Firestore query ──────────────────────────────
+    let results = await searchTutors({
+      schoolDomain: currentUser.schoolDomain!,
       subject: subject || undefined,
       day: day || undefined,
+      date: date || undefined,
     });
+
+    let effectiveSubject = subject;
+
+    // ── Stage 2: fuzzy-normalize to DEFAULT_SUBJECTS ─────────────────
+    // If the user typed a subject but got 0 results, map their input to the
+    // closest known subjects (e.g. "Sat" → ["SAT Prep"]) and retry.
+    if (subject && results.length === 0) {
+      const closest = findClosestSubjects(subject);
+
+      if (closest.length > 0) {
+        // Run parallel Firestore queries for all close matches
+        const parallelResults = await Promise.all(
+          closest.map((s) =>
+            searchTutors({
+              schoolDomain: currentUser.schoolDomain!,
+              subject: s,
+              day: day || undefined,
+              date: date || undefined,
+            })
+          )
+        );
+        // Merge, deduplicate by uid
+        const seen = new Set<string>();
+        results = parallelResults.flat().filter((t) => {
+          if (seen.has(t.uid)) return false;
+          seen.add(t.uid);
+          return true;
+        });
+        effectiveSubject = closest[0];
+        if (results.length > 0) {
+          setFuzzyNote(
+            `No exact match for "${subject}" — showing results for: ${closest.join(", ")}`
+          );
+        }
+      }
+
+      // ── Stage 3: full-school client-side fuzzy filter ───────────────
+      // Still 0 results? Fetch every tutor for the school and filter locally
+      // so custom subjects (e.g. "SAT Math", "ACT Prep") are also caught.
+      if (results.length === 0) {
+        const allTutors = await searchTutors({
+          schoolDomain: currentUser.schoolDomain!,
+          day: day || undefined,
+          date: date || undefined,
+        });
+        results = allTutors.filter((t) => tutorMatchesSubject(t.subjects, subject));
+        effectiveSubject = subject;
+        if (results.length > 0) {
+          setFuzzyNote(
+            `No exact match for "${subject}" — showing tutors with related subjects`
+          );
+        }
+      }
+    }
+
+    // Set raw results first so user sees something immediately
     setTutors(results);
     setSearching(false);
+
+    // ── AI recommendation in background (if more than 1 tutor) ────────
+    if (results.length > 1) {
+      setAiLoading(true);
+      try {
+        const rec = await getRecommendedTutors(results, {
+          subject: effectiveSubject || undefined,
+          date: date || undefined,
+          day: day || undefined,
+        });
+
+        // Apply AI scores to tutor cards
+        const scoreMap = new Map(rec.ranked.map((r) => [r.uid, r]));
+        const enriched = results.map((t) => {
+          const match = scoreMap.get(t.uid);
+          return {
+            ...t,
+            aiScore: match?.score ?? 50,
+            aiReason: match?.reason ?? undefined,
+          };
+        });
+
+        setTutors(enriched);
+        setAiPowered(rec.aiPowered);
+      } catch (err) {
+        console.warn("AI recommendation failed, using default order:", err);
+      } finally {
+        setAiLoading(false);
+      }
+    }
   };
 
-  const handleBook = async () => {
-    if (!bookModal || !currentUser) return;
-    try {
-      // Find the next occurrence of the day
-      const today = new Date();
-      const dayIndex = DAYS_OF_WEEK.indexOf(bookModal.slot.day as (typeof DAYS_OF_WEEK)[number]);
-      const diff = (dayIndex - today.getDay() + 7) % 7 || 7;
-      const date = new Date(today);
-      date.setDate(today.getDate() + diff);
+  // Sort tutors based on selected mode, then client-side filter by name
+  const sortedTutors = [...tutors]
+    .sort((a, b) => {
+      switch (sortMode) {
+        case "recommended":
+          // AI score first, fallback to rating
+          return (b.aiScore ?? 0) - (a.aiScore ?? 0) || b.avgRating - a.avgRating;
+        case "rating":
+          return b.avgRating - a.avgRating || b.reviewCount - a.reviewCount;
+        case "availability":
+          return b.availableSlots.length - a.availableSlots.length;
+        default:
+          return 0;
+      }
+    })
+    .filter((t) =>
+      !nameFilter.trim() ||
+      t.name.toLowerCase().includes(nameFilter.trim().toLowerCase())
+    );
 
-      const result = await bookSession({
-        tutorId:       bookModal.tutor.uid,
-        slotId:        bookModal.slot.id,
-        subject:       bookingSubject || bookModal.tutor.subjects[0],
-        scheduledDate: date.toISOString(),
+  const handleBook = async () => {
+    if (!bookModal || !currentUser || !bookingDate || booking) return;
+
+    // ── Duplicate guard ──────────────────────────────────────────────
+    // Reject if the tutee already has an upcoming session with this tutor
+    // on the same date at the same start time.
+    const duplicate = sessions.some((s) => {
+      if (s.status !== "upcoming") return false;
+      if (s.tutorId !== bookModal.tutor.uid) return false;
+      const sDate = s.scheduledDate.toDate().toISOString().split("T")[0];
+      return sDate === bookingDate && s.startTime === bookModal.slot.startTime;
+    });
+    if (duplicate) {
+      setToast({ msg: "You already have this session booked.", type: "error" });
+      setBookModal(null);
+      setBookingDate("");
+      return;
+    }
+
+    setBooking(true);
+    try {
+      const dateObj = new Date(bookingDate + "T12:00:00");
+      const slot = bookModal.slot;
+
+      if (slot.recurring) {
+        // For recurring slots: update bookedDates map
+        const bookedDates = { ...(slot.bookedDates ?? {}), [bookingDate]: currentUser.uid };
+        await updateDoc(doc(db, "users", bookModal.tutor.uid, "availability", slot.id), {
+          bookedDates,
+        });
+      } else {
+        // For one-off slots: mark as booked
+        await updateDoc(doc(db, "users", bookModal.tutor.uid, "availability", slot.id), {
+          booked: true,
+          bookedBy: currentUser.uid,
+        });
+      }
+
+      // Create session doc
+      await addDoc(collection(db, "sessions"), {
+        tutorId: bookModal.tutor.uid,
+        tuteeId: currentUser.uid,
+        tutorName: bookModal.tutor.name,
+        tuteeName: currentUser.name,
+        subject: bookingSubject || bookModal.tutor.subjects[0],
+        slotId: slot.id,
+        day: slot.day,
+        startTime: slot.startTime,
+        endTime: slot.endTime,
+        duration: slot.duration,
+        scheduledDate: Timestamp.fromDate(dateObj),
+        status: "upcoming",
+        meetLinkStatus: "pending",
+        schoolDomain: currentUser.schoolDomain,
+        createdAt: serverTimestamp(),
+        tutorRated: false,
+        tuteeRated: false,
+        // Track booking type for cancellation logic
+        recurringSlot: slot.recurring,
+        bookedDate: bookingDate,
       });
 
       setBookModal(null);
+      setBookingDate("");
       setTab("sessions");
-      setToast({
-        msg: result.data.meetLinkStatus === "ready"
-          ? "Session booked! Google Meet link sent to your email."
-          : "Session booked! Meet link will be emailed shortly.",
-        type: "success",
-      });
+      setToast({ msg: "Session booked!", type: "success" });
     } catch (err: unknown) {
       setToast({ msg: (err as Error).message ?? "Booking failed", type: "error" });
+    } finally {
+      setBooking(false);
     }
   };
 
   const handleCancel = async () => {
-    if (!cancelModal) return;
+    if (!cancelModal || !currentUser) return;
     try {
-      await cancelSession({ sessionId: cancelModal.id });
+      await updateDoc(doc(db, "sessions", cancelModal.id), {
+        status: "cancelled",
+        cancelledAt: serverTimestamp(),
+        cancelledBy: currentUser.uid,
+      });
+      // Free the slot
+      if (cancelModal.slotId) {
+        const sessionData = cancelModal as SessionDoc & { recurringSlot?: boolean; bookedDate?: string };
+        if (sessionData.recurringSlot && sessionData.bookedDate) {
+          // For recurring: remove date from bookedDates
+          const slotRef = doc(db, "users", cancelModal.tutorId, "availability", cancelModal.slotId);
+          // We need to fetch current bookedDates and remove this date
+          const { getDoc: getDocFn } = await import("firebase/firestore");
+          const slotSnap = await getDocFn(slotRef);
+          if (slotSnap.exists()) {
+            const data = slotSnap.data();
+            const bookedDates = { ...(data.bookedDates ?? {}) };
+            delete bookedDates[sessionData.bookedDate];
+            await updateDoc(slotRef, { bookedDates });
+          }
+        } else {
+          // For one-off: mark slot as unbooked
+          await updateDoc(doc(db, "users", cancelModal.tutorId, "availability", cancelModal.slotId), {
+            booked: false,
+            bookedBy: null,
+          });
+        }
+      }
       setToast({ msg: "Session cancelled", type: "success" });
     } catch {
       setToast({ msg: "Cancel failed", type: "error" });
@@ -107,15 +471,60 @@ export default function TuteeBooking() {
   };
 
   const handleRate = async () => {
-    if (!rateModal || stars === 0) return;
+    if (!rateModal || stars === 0 || !currentUser) return;
     try {
-      await submitRating({ sessionId: rateModal.id, stars: stars as 1|2|3|4|5, text: reviewText });
+      await addDoc(collection(db, "reviews"), {
+        sessionId: rateModal.id,
+        authorId: currentUser.uid,
+        authorName: currentUser.name,
+        targetId: rateModal.tutorId,
+        targetName: rateModal.tutorName,
+        stars: stars as 1 | 2 | 3 | 4 | 5,
+        text: reviewText || null,
+        flagged: false,
+        schoolDomain: currentUser.schoolDomain,
+        createdAt: serverTimestamp(),
+      });
+      await updateDoc(doc(db, "sessions", rateModal.id), {
+        tuteeRated: true,
+      });
+      const tutorDoc = await getUserDoc(rateModal.tutorId);
+      if (tutorDoc) {
+        const oldCount = tutorDoc.reviewCount ?? 0;
+        const oldAvg = tutorDoc.avgRating ?? 0;
+        const newCount = oldCount + 1;
+        const newAvg = (oldAvg * oldCount + stars) / newCount;
+        await updateDoc(doc(db, "users", rateModal.tutorId), {
+          avgRating: Math.round(newAvg * 10) / 10,
+          reviewCount: newCount,
+        });
+      }
       setRateModal(null);
       setStars(0);
       setReviewText("");
-      setToast({ msg: "Rating submitted — thanks!", type: "success" });
+      setToast({ msg: "Rating submitted -- thanks!", type: "success" });
     } catch {
       setToast({ msg: "Failed to submit rating", type: "error" });
+    }
+  };
+
+  // Profile editing
+  const [profileModal, setProfileModal] = useState(false);
+  const [profileName, setProfileName] = useState("");
+  const [profileGrade, setProfileGrade] = useState("");
+
+  const handleSaveProfile = async () => {
+    if (!currentUser || !profileName) return;
+    try {
+      await updateDoc(doc(db, "users", currentUser.uid), {
+        name: profileName,
+        grade: profileGrade || null,
+        updatedAt: serverTimestamp(),
+      });
+      setToast({ msg: "Profile updated", type: "success" });
+      setProfileModal(false);
+    } catch {
+      setToast({ msg: "Update failed", type: "error" });
     }
   };
 
@@ -123,28 +532,47 @@ export default function TuteeBooking() {
   const completed = sessions.filter((s) => s.status === "completed" && !s.tuteeRated);
   const allDone   = sessions.filter((s) => s.status === "completed");
 
+  // Get min date for date filter (today)
+  const minDate = new Date().toISOString().split("T")[0];
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+      {/* School Banner */}
+      <SchoolBanner variant="full" className="mb-4" />
+
       {/* Header */}
-      <div className="mb-6">
-        <h1 className="font-display text-3xl text-gray-900">Find a Tutor</h1>
-        <p className="text-gray-500 text-sm mt-1">
-          All tutors are from {currentUser?.schoolDomain} and school-verified.
-        </p>
+      <div className="flex items-start justify-between mb-6">
+        <div>
+          <h1 className="font-display text-3xl text-gray-900">Find a Tutor</h1>
+          <p className="text-gray-500 text-sm mt-1">
+            All tutors are from {school?.name || currentUser?.schoolDomain} and school-verified.
+          </p>
+        </div>
+        <Button variant="secondary" onClick={() => {
+          setProfileName(currentUser?.name ?? "");
+          setProfileGrade(currentUser?.grade ?? "");
+          setProfileModal(true);
+        }}>
+          <User className="w-4 h-4" /> Edit Profile
+        </Button>
       </div>
 
       {/* Tab toggle */}
-      <div className="flex gap-1 bg-gray-100 rounded-lg p-1 mb-6 max-w-xs">
-        {(["search", "sessions"] as const).map((t) => (
+      <div className="flex gap-1 bg-gray-100 rounded-lg p-1 mb-6 w-fit">
+        {([
+          { key: "search",   label: "Search"      },
+          { key: "calendar", label: "Calendar"     },
+          { key: "sessions", label: "My Sessions"  },
+        ] as const).map(({ key, label }) => (
           <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`flex-1 py-2 rounded text-sm font-medium transition-colors relative ${
-              tab === t ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
+            key={key}
+            onClick={() => setTab(key)}
+            className={`px-4 py-2 rounded text-sm font-medium transition-colors relative ${
+              tab === key ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
             }`}
           >
-            {t === "search" ? "Search" : "My Sessions"}
-            {t === "sessions" && completed.length > 0 && (
+            {label}
+            {key === "sessions" && completed.length > 0 && (
               <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-brand-500 text-white text-[9px] flex items-center justify-center">
                 {completed.length}
               </span>
@@ -157,53 +585,161 @@ export default function TuteeBooking() {
       {tab === "search" && (
         <>
           {/* Filters */}
-          <div className="bg-white border border-gray-200 rounded-lg p-4 mb-6 flex flex-col sm:flex-row gap-3">
-            <Select
-              label="Subject"
-              placeholder="Any subject"
-              options={DEFAULT_SUBJECTS.map((s) => ({ value: s, label: s }))}
-              value={subject}
-              onChange={(e) => setSubject(e.target.value)}
-              className="flex-1"
-            />
-            <Select
-              label="Day"
-              placeholder="Any day"
-              options={DAYS_OF_WEEK.map((d) => ({ value: d, label: d }))}
-              value={day}
-              onChange={(e) => setDay(e.target.value)}
-              className="flex-1"
-            />
-            <div className="flex items-end">
-              <Button onClick={handleSearch} loading={searching} className="w-full sm:w-auto">
-                <Search className="w-4 h-4" /> Search
-              </Button>
+          <div className="bg-white border border-gray-200 rounded-lg p-4 mb-6">
+            <div className="flex flex-col sm:flex-row gap-3">
+              {/* Subject — free-text with datalist suggestions */}
+              <div className="flex-1 flex flex-col gap-1">
+                <label className="text-xs font-medium text-gray-600">Subject</label>
+                <input
+                  list="subject-suggestions"
+                  value={subject}
+                  onChange={(e) => setSubject(e.target.value)}
+                  placeholder="Any subject (e.g. Calculus, Latin…)"
+                  className="h-9 rounded-lg border border-gray-300 px-3 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-400 focus:border-transparent w-full"
+                />
+                <datalist id="subject-suggestions">
+                  {DEFAULT_SUBJECTS.map((s) => (
+                    <option key={s} value={s} />
+                  ))}
+                </datalist>
+              </div>
+
+              {/* Tutor name — client-side filter */}
+              <div className="flex-1 flex flex-col gap-1">
+                <label className="text-xs font-medium text-gray-600">Tutor Name</label>
+                <input
+                  value={nameFilter}
+                  onChange={(e) => setNameFilter(e.target.value)}
+                  placeholder="Search by name…"
+                  className="h-9 rounded-lg border border-gray-300 px-3 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-400 focus:border-transparent w-full"
+                />
+              </div>
+
+              <Select
+                label="Day"
+                placeholder="Any day"
+                options={DAYS_OF_WEEK.map((d) => ({ value: d, label: d }))}
+                value={day}
+                onChange={(e) => setDay(e.target.value)}
+                className="flex-1"
+              />
+              <Input
+                label="Specific Date"
+                type="date"
+                min={minDate}
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="flex-1"
+              />
+              <div className="flex items-end">
+                <Button onClick={handleSearch} loading={searching} className="w-full sm:w-auto">
+                  <Search className="w-4 h-4" /> Search
+                </Button>
+              </div>
             </div>
+            {(subject || nameFilter || day || date) && (
+              <button
+                onClick={() => { setSubject(""); setNameFilter(""); setDay(""); setDate(""); setFuzzyNote(null); }}
+                className="mt-2 text-xs text-brand-600 hover:text-brand-700"
+              >
+                Clear all filters
+              </button>
+            )}
           </div>
 
           {/* Results */}
           {searching && (
-            <div className="text-center py-16 text-gray-400 text-sm">Searching…</div>
+            <div className="text-center py-16 text-gray-400 text-sm">Searching...</div>
           )}
 
-          {!searching && hasSearched && tutors.length === 0 && (
+          {!searching && hasSearched && sortedTutors.length === 0 && (
             <div className="text-center py-16 text-gray-400">
               <User className="w-10 h-10 mx-auto mb-3 opacity-30" />
-              <p className="font-medium text-gray-600 mb-1">No tutors found</p>
+              <p className="font-medium text-gray-600 mb-1">
+                {tutors.length > 0 && nameFilter.trim()
+                  ? `No tutors named "${nameFilter.trim()}" in results`
+                  : "No tutors found"}
+              </p>
               <p className="text-sm">Try removing filters or check back later.</p>
             </div>
           )}
 
-          {!searching && tutors.length > 0 && (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {tutors.map((tutor) => (
-                <TutorCard
-                  key={tutor.uid}
-                  tutor={tutor}
-                  onBook={(slot) => { setBookModal({ tutor, slot }); setBookingSubject(tutor.subjects[0] ?? ""); }}
-                />
-              ))}
-            </div>
+          {!searching && sortedTutors.length > 0 && (
+            <>
+              {/* Fuzzy / normalised search note */}
+              {fuzzyNote && (
+                <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-xs">
+                  <Search className="w-3.5 h-3.5 flex-shrink-0" />
+                  <span>{fuzzyNote}</span>
+                </div>
+              )}
+
+              {/* Sort controls + AI badge */}
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-gray-500">
+                    {sortedTutors.length}{tutors.length !== sortedTutors.length ? ` of ${tutors.length}` : ""} tutor{sortedTutors.length !== 1 ? "s" : ""} found
+                    {nameFilter.trim() ? ` matching "${nameFilter.trim()}"` : ""}
+                  </span>
+                  {aiLoading && (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-purple-50 text-purple-600 text-xs font-medium animate-pulse">
+                      <Sparkles className="w-3 h-3" />
+                      AI ranking...
+                    </span>
+                  )}
+                  {!aiLoading && aiPowered && sortMode === "recommended" && (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-purple-50 text-purple-600 text-xs font-medium">
+                      <Sparkles className="w-3 h-3" />
+                      AI Recommended
+                    </span>
+                  )}
+                  {!aiLoading && !aiPowered && tutors.some((t) => t.aiScore !== undefined) && sortMode === "recommended" && (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-gray-100 text-gray-500 text-xs font-medium">
+                      <ArrowUpDown className="w-3 h-3" />
+                      Smart sorted
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
+                  {([
+                    { key: "recommended" as SortMode, label: "Best Match", icon: Sparkles },
+                    { key: "rating" as SortMode, label: "Rating", icon: Star },
+                    { key: "availability" as SortMode, label: "Slots", icon: Calendar },
+                  ]).map(({ key, label, icon: Icon }) => (
+                    <button
+                      key={key}
+                      onClick={() => setSortMode(key)}
+                      className={`flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-medium transition-colors ${
+                        sortMode === key
+                          ? "bg-white text-gray-900 shadow-sm"
+                          : "text-gray-500 hover:text-gray-700"
+                      }`}
+                    >
+                      <Icon className="w-3 h-3" />
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                {sortedTutors.map((tutor, idx) => (
+                  <TutorCard
+                    key={tutor.uid}
+                    tutor={tutor}
+                    rank={sortMode === "recommended" && tutor.aiScore !== undefined ? idx + 1 : undefined}
+                    showAiReason={sortMode === "recommended" && !!tutor.aiReason}
+                    onBook={(slot) => {
+                      const availDates = getAvailableDates(slot);
+                      setBookModal({ tutor, slot });
+                      setBookingSubject(tutor.subjects[0] ?? "");
+                      // Pre-select first available date
+                      setBookingDate(availDates[0] ?? "");
+                    }}
+                  />
+                ))}
+              </div>
+            </>
           )}
 
           {!hasSearched && (
@@ -215,14 +751,156 @@ export default function TuteeBooking() {
         </>
       )}
 
+      {/* ── Calendar Tab ── */}
+      {tab === "calendar" && (
+        <div className="grid grid-cols-1 lg:grid-cols-[400px_1fr] gap-6">
+          {/* Calendar panel */}
+          <div className="bg-white rounded-lg border border-gray-200 p-5">
+            <h2 className="font-display text-lg text-gray-900 mb-4">Tutor Availability</h2>
+            {calLoading ? (
+              <div className="text-center py-16 text-gray-400 text-sm">Loading tutors…</div>
+            ) : (
+              <>
+                <CalendarGrid
+                  year={calYear}
+                  month={calMonth}
+                  dots={calendarDots}
+                  selectedDate={calSelected ?? undefined}
+                  onDayClick={(d) => setCalSelected(calSelected === d ? null : d)}
+                  onMonthChange={changeCalMonth}
+                />
+                {/* Legend */}
+                <div className="flex flex-wrap gap-3 mt-4 text-xs text-gray-500">
+                  {[
+                    { color: "bg-green-500", label: "Tutor available" },
+                    { color: "bg-blue-500",  label: "My session"      },
+                  ].map(({ color, label }) => (
+                    <span key={label} className="flex items-center gap-1.5">
+                      <span className={`w-2 h-2 rounded-full ${color}`} />
+                      {label}
+                    </span>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Day detail panel */}
+          <div className="bg-white rounded-lg border border-gray-200 p-5">
+            {!calSelected ? (
+              <div className="h-full flex flex-col items-center justify-center text-center text-gray-400 py-16">
+                <Calendar className="w-10 h-10 mb-3 opacity-30" />
+                <p className="text-sm font-medium text-gray-500 mb-1">Pick a day</p>
+                <p className="text-xs">Green dots show days when tutors are available to book.</p>
+              </div>
+            ) : (
+              <div>
+                <h3 className="font-display text-base text-gray-900 mb-4">
+                  {format(new Date(calSelected + "T12:00:00"), "EEEE, MMMM d")}
+                </h3>
+
+                {/* My sessions on this day */}
+                {calDaySessions.length > 0 && (
+                  <div className="mb-5">
+                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Your Sessions</p>
+                    <div className="flex flex-col gap-2">
+                      {calDaySessions.map((s) => (
+                        <div key={s.id} className="flex items-center gap-3 px-3 py-2.5 rounded border bg-blue-50 border-blue-100 text-sm text-blue-800">
+                          <Calendar className="w-3.5 h-3.5 opacity-60" />
+                          <span className="font-medium">{s.tutorName}</span>
+                          <Badge color="blue">{s.subject}</Badge>
+                          <span className="text-xs opacity-60">{s.startTime}–{s.endTime}</span>
+                          {s.meetLink && (() => {
+                            const base = s.scheduledDate.toDate();
+                            const [sh, sm2] = (s.startTime ?? "00:00").split(":").map(Number);
+                            const [eh, em2] = (s.endTime   ?? "00:00").split(":").map(Number);
+                            const startMs = new Date(base.getFullYear(), base.getMonth(), base.getDate(), sh, sm2).getTime();
+                            const endMs   = new Date(base.getFullYear(), base.getMonth(), base.getDate(), eh, em2).getTime();
+                            const n = Date.now();
+                            const joinable = n >= startMs - 15 * 60 * 1000 && n <= endMs + 5 * 60 * 1000;
+                            return joinable ? (
+                              <a href={s.meetLink} target="_blank" rel="noopener noreferrer" className="ml-auto">
+                                <Button size="sm"><Video className="w-3 h-3" /> Join</Button>
+                              </a>
+                            ) : null;
+                          })()}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Available tutors on this day */}
+                {calDayTutors.length === 0 && calDaySessions.length === 0 && (
+                  <div className="text-center py-10 text-gray-400">
+                    <Clock className="w-7 h-7 mx-auto mb-2 opacity-40" />
+                    <p className="text-sm">No tutors available on this day.</p>
+                  </div>
+                )}
+
+                {calDayTutors.length > 0 && (
+                  <>
+                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+                      Available Tutors — {calDayTutors.length}
+                    </p>
+                    <div className="flex flex-col gap-3">
+                      {calDayTutors.map(({ tutor, slots }) => (
+                        <div key={tutor.uid} className="border border-gray-100 rounded-lg p-4">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-2">
+                              <div className="w-8 h-8 rounded-full bg-brand-100 flex items-center justify-center text-brand-600 font-semibold text-sm">
+                                {tutor.name.charAt(0)}
+                              </div>
+                              <div>
+                                <p className="font-medium text-gray-900 text-sm">{tutor.name}</p>
+                                <p className="text-xs text-gray-400">{tutor.grade}</p>
+                              </div>
+                            </div>
+                            {tutor.avgRating > 0 && (
+                              <div className="flex items-center gap-1 text-xs text-gray-500">
+                                <Star className="w-3 h-3 text-amber-400 fill-amber-400" />
+                                {tutor.avgRating.toFixed(1)}
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap gap-1 mb-3">
+                            {tutor.subjects.slice(0, 3).map((s) => (
+                              <Badge key={s} color="blue">{s}</Badge>
+                            ))}
+                            {tutor.subjects.length > 3 && <Badge color="gray">+{tutor.subjects.length - 3}</Badge>}
+                          </div>
+                          <div className="flex flex-col gap-1.5">
+                            {slots.map((slot) => (
+                              <div key={slot.id} className="flex items-center justify-between bg-green-50 border border-green-100 rounded px-3 py-2 text-sm text-green-700">
+                                <span className="font-medium">{slot.startTime}–{slot.endTime} <span className="text-xs opacity-60">({slot.duration} min)</span></span>
+                                <Button size="sm" onClick={() => {
+                                  setBookModal({ tutor, slot });
+                                  setBookingSubject(tutor.subjects[0] ?? "");
+                                  setBookingDate(calSelected);
+                                }}>
+                                  Book
+                                </Button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ── Sessions Tab ── */}
       {tab === "sessions" && (
         <div className="flex flex-col gap-6">
-          {/* Rate prompt */}
           {completed.length > 0 && (
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
               <p className="text-sm font-medium text-amber-800 mb-3">
-                ⭐ You have {completed.length} session{completed.length > 1 ? "s" : ""} to rate
+                You have {completed.length} session{completed.length > 1 ? "s" : ""} to rate
               </p>
               <div className="flex flex-wrap gap-2">
                 {completed.map((s) => (
@@ -231,19 +909,21 @@ export default function TuteeBooking() {
                     onClick={() => { setRateModal(s); setStars(0); }}
                     className="px-3 py-1.5 bg-white border border-amber-200 rounded text-xs font-medium text-amber-700 hover:border-amber-400 transition-colors"
                   >
-                    Rate {s.tutorName} →
+                    Rate {s.tutorName}
                   </button>
                 ))}
               </div>
             </div>
           )}
 
-          {/* Upcoming */}
           <div>
             <h2 className="font-display text-xl text-gray-900 mb-3">Upcoming</h2>
             {upcoming.length === 0 ? (
-              <div className="bg-white border border-gray-100 rounded-lg p-8 text-center text-gray-400">
-                <p className="text-sm">No upcoming sessions. Go find a tutor!</p>
+              <div className="bg-white border border-gray-100 rounded-lg p-8 text-center text-gray-400 flex flex-col items-center gap-3">
+                <p className="text-sm">No upcoming sessions.</p>
+                <Button variant="secondary" onClick={() => setTab("search")}>
+                  <Search className="w-4 h-4" /> Find a Tutor
+                </Button>
               </div>
             ) : (
               <div className="flex flex-col gap-3">
@@ -259,7 +939,6 @@ export default function TuteeBooking() {
             )}
           </div>
 
-          {/* Past */}
           {allDone.length > 0 && (
             <div>
               <h2 className="font-display text-xl text-gray-900 mb-3">Past Sessions</h2>
@@ -280,32 +959,107 @@ export default function TuteeBooking() {
       )}
 
       {/* ── Book Modal ── */}
-      <Modal open={!!bookModal} onClose={() => setBookModal(null)} title="Book a Session">
-        {bookModal && (
-          <div className="flex flex-col gap-4">
-            <div className="bg-gray-50 rounded p-4 text-sm">
-              <p className="font-medium text-gray-900 mb-1">Tutor: {bookModal.tutor.name}</p>
-              <p className="text-gray-500">
-                {bookModal.slot.day} · {bookModal.slot.startTime}–{bookModal.slot.endTime}
-                {" "}({bookModal.slot.duration} min)
-              </p>
+      <Modal open={!!bookModal} onClose={() => { setBookModal(null); setBookingDate(""); }} title="Book a Session">
+        {bookModal && (() => {
+          // Dates the slot has available, minus any already booked by this tutee
+          const alreadyBooked = new Set(
+            sessions
+              .filter(
+                (s) =>
+                  s.status === "upcoming" &&
+                  s.tutorId === bookModal.tutor.uid &&
+                  s.startTime === bookModal.slot.startTime
+              )
+              .map((s) => s.scheduledDate.toDate().toISOString().split("T")[0])
+          );
+          const availDates = getAvailableDates(bookModal.slot).filter(
+            (d) => !alreadyBooked.has(d)
+          );
+          return (
+            <div className="flex flex-col gap-4">
+              <div className="bg-gray-50 rounded p-4 text-sm">
+                <p className="font-medium text-gray-900 mb-1">Tutor: {bookModal.tutor.name}</p>
+                <div className="flex items-center gap-2 text-gray-500">
+                  {bookModal.slot.recurring ? (
+                    <>
+                      <Repeat className="w-3 h-3 text-brand-500" />
+                      <span>Every {bookModal.slot.day}</span>
+                    </>
+                  ) : (
+                    <>
+                      <CalendarDays className="w-3 h-3 text-green-500" />
+                      <span>{bookModal.slot.date ? format(new Date(bookModal.slot.date + "T12:00:00"), "EEE, MMM d, yyyy") : bookModal.slot.day}</span>
+                    </>
+                  )}
+                  <span>· {bookModal.slot.startTime}--{bookModal.slot.endTime} ({bookModal.slot.duration} min)</span>
+                </div>
+                {/* AI recommendation reason */}
+                {bookModal.tutor.aiReason && (
+                  <div className="mt-2 flex items-start gap-1.5 text-xs text-purple-600">
+                    <Sparkles className="w-3 h-3 mt-0.5 flex-shrink-0" />
+                    <span>{bookModal.tutor.aiReason}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Date selection */}
+              <div>
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                  Select Date
+                </p>
+                {availDates.length === 0 ? (
+                  <p className="text-sm text-red-500">No available dates — you may have already booked this slot.</p>
+                ) : availDates.length === 1 ? (
+                  // Auto-select the only available date
+                  <div
+                    className="px-3 py-2.5 bg-green-50 border border-green-100 rounded text-sm text-green-700 font-medium cursor-default"
+                    ref={(el) => { if (el && bookingDate !== availDates[0]) setBookingDate(availDates[0]); }}
+                  >
+                    {format(new Date(availDates[0] + "T12:00:00"), "EEEE, MMMM d, yyyy")}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2">
+                    {availDates.map((d) => (
+                      <button
+                        key={d}
+                        type="button"
+                        onClick={() => setBookingDate(d)}
+                        className={`px-3 py-2.5 rounded border text-sm font-medium transition-colors ${
+                          bookingDate === d
+                            ? "bg-brand-50 border-brand-300 text-brand-700"
+                            : "bg-white border-gray-200 text-gray-600 hover:border-brand-200"
+                        }`}
+                      >
+                        {format(new Date(d + "T12:00:00"), "EEE, MMM d")}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <Select
+                label="Subject"
+                options={bookModal.tutor.subjects.map((s) => ({ value: s, label: s }))}
+                value={bookingSubject}
+                onChange={(e) => setBookingSubject(e.target.value)}
+              />
+              <div className="bg-blue-50 border border-blue-100 rounded p-3 text-xs text-blue-700">
+                A Google Meet link and calendar invite will be sent to your school email within 30 seconds.
+              </div>
+              <Divider />
+              <div className="flex justify-end gap-2">
+                <Button variant="secondary" onClick={() => setBookModal(null)}>Cancel</Button>
+                <Button
+                  onClick={handleBook}
+                  loading={booking}
+                  disabled={booking || !bookingDate || availDates.length === 0}
+                >
+                  Confirm Booking
+                </Button>
+              </div>
             </div>
-            <Select
-              label="Subject"
-              options={bookModal.tutor.subjects.map((s) => ({ value: s, label: s }))}
-              value={bookingSubject}
-              onChange={(e) => setBookingSubject(e.target.value)}
-            />
-            <div className="bg-blue-50 border border-blue-100 rounded p-3 text-xs text-blue-700">
-              A Google Meet link and calendar invite will be sent to your school email within 30 seconds.
-            </div>
-            <Divider />
-            <div className="flex justify-end gap-2">
-              <Button variant="secondary" onClick={() => setBookModal(null)}>Cancel</Button>
-              <Button onClick={handleBook}>Confirm Booking</Button>
-            </div>
-          </div>
-        )}
+          );
+        })()}
       </Modal>
 
       {/* ── Rate Modal ── */}
@@ -326,7 +1080,7 @@ export default function TuteeBooking() {
             <textarea
               value={reviewText}
               onChange={(e) => setReviewText(e.target.value)}
-              placeholder="Write a review (optional)…"
+              placeholder="Write a review (optional)..."
               className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded resize-none min-h-[80px] focus:outline-none focus:ring-2 focus:ring-brand-500"
             />
             <Divider />
@@ -350,6 +1104,28 @@ export default function TuteeBooking() {
         </div>
       </Modal>
 
+      {/* ── Profile Modal ── */}
+      <Modal open={profileModal} onClose={() => setProfileModal(false)} title="Edit Profile">
+        <div className="flex flex-col gap-4">
+          <Input
+            label="Name"
+            value={profileName}
+            onChange={(e) => setProfileName(e.target.value)}
+          />
+          <Select
+            label="Grade"
+            options={GRADES}
+            value={profileGrade}
+            onChange={(e) => setProfileGrade(e.target.value)}
+          />
+          <Divider />
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setProfileModal(false)}>Cancel</Button>
+            <Button onClick={handleSaveProfile} disabled={!profileName}>Save Profile</Button>
+          </div>
+        </div>
+      </Modal>
+
       {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
     </div>
   );
@@ -358,34 +1134,66 @@ export default function TuteeBooking() {
 // ── Sub-components ────────────────────────────────────────────────
 
 function TutorCard({
-  tutor, onBook,
+  tutor, onBook, rank, showAiReason,
 }: {
-  tutor: TutorCard;
+  tutor: TutorCardType;
   onBook: (slot: AvailabilitySlot) => void;
+  rank?: number;
+  showAiReason?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <div className="bg-white border border-gray-200 rounded-lg overflow-hidden hover:border-brand-200 transition-colors">
+    <div className={`bg-white border rounded-lg overflow-hidden transition-colors ${
+      rank === 1 ? "border-purple-200 ring-1 ring-purple-100" : "border-gray-200 hover:border-brand-200"
+    }`}>
       <div className="p-4">
         <div className="flex items-start justify-between mb-3">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-brand-100 flex items-center justify-center text-brand-600 font-semibold text-sm">
-              {tutor.name.charAt(0)}
+            {/* Rank badge or avatar */}
+            <div className="relative">
+              <div className="w-10 h-10 rounded-full bg-brand-100 flex items-center justify-center text-brand-600 font-semibold text-sm">
+                {tutor.name.charAt(0)}
+              </div>
+              {rank !== undefined && rank <= 3 && (
+                <div className={`absolute -top-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                  rank === 1 ? "bg-purple-500 text-white" :
+                  rank === 2 ? "bg-purple-300 text-white" :
+                  "bg-purple-100 text-purple-600"
+                }`}>
+                  {rank}
+                </div>
+              )}
             </div>
             <div>
               <p className="font-medium text-gray-900 text-sm">{tutor.name}</p>
               <p className="text-xs text-gray-500">{tutor.grade}</p>
             </div>
           </div>
-          {tutor.avgRating > 0 && (
-            <div className="flex items-center gap-1">
-              <Star className="w-3 h-3 text-amber-400 fill-amber-400" />
-              <span className="text-xs font-medium text-gray-700">{tutor.avgRating.toFixed(1)}</span>
-              <span className="text-xs text-gray-400">({tutor.reviewCount})</span>
-            </div>
-          )}
+          <div className="flex flex-col items-end gap-1">
+            {tutor.avgRating > 0 && (
+              <div className="flex items-center gap-1">
+                <Star className="w-3 h-3 text-amber-400 fill-amber-400" />
+                <span className="text-xs font-medium text-gray-700">{tutor.avgRating.toFixed(1)}</span>
+                <span className="text-xs text-gray-400">({tutor.reviewCount})</span>
+              </div>
+            )}
+            {tutor.aiScore !== undefined && (
+              <div className="flex items-center gap-1">
+                <Sparkles className="w-3 h-3 text-purple-400" />
+                <span className="text-[10px] font-medium text-purple-500">{tutor.aiScore}% match</span>
+              </div>
+            )}
+          </div>
         </div>
+
+        {/* AI recommendation reason */}
+        {showAiReason && tutor.aiReason && (
+          <div className="flex items-start gap-1.5 mb-3 px-2.5 py-2 bg-purple-50 rounded-md">
+            <Sparkles className="w-3 h-3 text-purple-500 mt-0.5 flex-shrink-0" />
+            <p className="text-xs text-purple-700 leading-relaxed">{tutor.aiReason}</p>
+          </div>
+        )}
 
         {/* Subjects */}
         <div className="flex flex-wrap gap-1 mb-3">
@@ -418,9 +1226,18 @@ function TutorCard({
               key={slot.id}
               className="flex items-center justify-between bg-gray-50 rounded px-3 py-2"
             >
-              <div className="text-xs text-gray-700">
-                <span className="font-medium">{slot.day}</span>
-                {" · "}{slot.startTime}–{slot.endTime}{" "}
+              <div className="text-xs text-gray-700 flex items-center gap-1.5">
+                {slot.recurring ? (
+                  <Repeat className="w-3 h-3 text-brand-400" />
+                ) : (
+                  <CalendarDays className="w-3 h-3 text-green-400" />
+                )}
+                <span className="font-medium">
+                  {slot.recurring
+                    ? `Every ${slot.day}`
+                    : (slot.date ? format(new Date(slot.date + "T12:00:00"), "EEE, MMM d") : slot.day)}
+                </span>
+                {" · "}{slot.startTime}--{slot.endTime}{" "}
                 <span className="text-gray-400">({slot.duration} min)</span>
               </div>
               <Button size="sm" onClick={() => onBook(slot)}>Book</Button>
@@ -444,6 +1261,34 @@ function SessionRow({
   const other = role === "tutee" ? session.tutorName : session.tuteeName;
   const isUpcoming = session.status === "upcoming";
 
+  // Re-evaluate every 30 s so the Join button appears automatically
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Show Join only within 15 mins before start and up to 5 mins after end
+  const canJoin = useMemo(() => {
+    if (!session.meetLink || !isUpcoming) return false;
+    const base = session.scheduledDate.toDate();
+    const [sh, sm] = (session.startTime ?? "00:00").split(":").map(Number);
+    const [eh, em] = (session.endTime   ?? "00:00").split(":").map(Number);
+    const startMs = new Date(base.getFullYear(), base.getMonth(), base.getDate(), sh, sm).getTime();
+    const endMs   = new Date(base.getFullYear(), base.getMonth(), base.getDate(), eh, em).getTime();
+    return now >= startMs - 15 * 60 * 1000 && now <= endMs + 5 * 60 * 1000;
+  }, [now, session, isUpcoming]);
+
+  // How many minutes until the Join window opens (for tooltip / disabled hint)
+  const minsUntilJoin = useMemo(() => {
+    if (!session.meetLink || !isUpcoming) return null;
+    const base = session.scheduledDate.toDate();
+    const [sh, sm] = (session.startTime ?? "00:00").split(":").map(Number);
+    const startMs = new Date(base.getFullYear(), base.getMonth(), base.getDate(), sh, sm).getTime();
+    const diff = Math.ceil((startMs - 15 * 60 * 1000 - now) / 60_000);
+    return diff > 0 ? diff : null;
+  }, [now, session, isUpcoming]);
+
   return (
     <div className="bg-white border border-gray-100 rounded-lg p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
       <div>
@@ -458,20 +1303,24 @@ function SessionRow({
             <Calendar className="w-3 h-3" />
             {format(session.scheduledDate.toDate(), "EEE, MMM d")}
           </span>
-          <span>{session.startTime}–{session.endTime}</span>
+          <span>{session.startTime}--{session.endTime}</span>
           <span className="flex items-center gap-1">
             <Clock className="w-3 h-3" /> {session.duration} min
           </span>
           <Badge color="blue">{session.subject}</Badge>
         </div>
       </div>
-      <div className="flex gap-2">
+      <div className="flex items-center gap-2">
         {isUpcoming && session.meetLink && (
-          <a href={session.meetLink} target="_blank" rel="noopener noreferrer">
-            <Button size="sm">
-              <Video className="w-3 h-3" /> Join
-            </Button>
-          </a>
+          canJoin ? (
+            <a href={session.meetLink} target="_blank" rel="noopener noreferrer">
+              <Button size="sm"><Video className="w-3 h-3" /> Join</Button>
+            </a>
+          ) : minsUntilJoin !== null ? (
+            <span className="text-xs text-gray-400 whitespace-nowrap">
+              Join in {minsUntilJoin} min
+            </span>
+          ) : null
         )}
         {isUpcoming && onCancel && (
           <Button size="sm" variant="ghost" onClick={onCancel}>Cancel</Button>

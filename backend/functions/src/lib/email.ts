@@ -124,21 +124,6 @@ export async function sendRatingPrompt(params: {
   );
 }
 
-// ── Parental consent ─────────────────────────────────────────────
-
-export async function sendParentalConsentEmail(params: {
-  parentEmail:  string;
-  studentName:  string;
-  studentEmail: string;
-  consentUrl:   string;
-}) {
-  await send(
-    params.parentEmail,
-    process.env.SENDGRID_TEMPLATE_PARENTAL_CONSENT!,
-    params
-  );
-}
-
 // ── ICS calendar invite ──────────────────────────────────────────
 
 function generateIcs(params: {

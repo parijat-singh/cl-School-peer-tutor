@@ -55,6 +55,33 @@ export const registerSchool = httpsCallable<
   { success: boolean; message: string }
 >(fns, "registerSchool");
 
+export const addSchool = httpsCallable<
+  { domain: string; name: string; type: string; adminEmail: string; campus: string; address: string; location: string },
+  { success: boolean; message: string }
+>(fns, "addSchool");
+
+// ── Super Admin ─────────────────────────────────────────────────
+
+export const approveSchool = httpsCallable<
+  { domain: string },
+  { success: boolean }
+>(fns, "approveSchool");
+
+export const rejectSchool = httpsCallable<
+  { domain: string; reason: string },
+  { success: boolean }
+>(fns, "rejectSchool");
+
+export const removeSchool = httpsCallable<
+  { domain: string },
+  { success: boolean }
+>(fns, "removeSchool");
+
+export const promoteSuperAdmin = httpsCallable<
+  { targetUid: string },
+  { success: boolean }
+>(fns, "promoteSuperAdmin");
+
 // ── Tutor profile ────────────────────────────────────────────────
 
 export const updateTutorProfile = httpsCallable<

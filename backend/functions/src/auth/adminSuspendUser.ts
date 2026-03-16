@@ -7,7 +7,10 @@ export const adminSuspendUser = functions.onCall(
   { region: "us-central1" },
   async (request) => {
     if (!request.auth) throw new functions.HttpsError("unauthenticated", "Sign in required.");
-    if (request.auth.token.role !== "admin") throw new functions.HttpsError("permission-denied", "Admins only.");
+    const callerRole = request.auth.token.role;
+    if (!["schooladmin", "superadmin"].includes(callerRole)) {
+      throw new functions.HttpsError("permission-denied", "Admins only.");
+    }
 
     const { targetUid, durationDays, reason } = request.data as {
       targetUid:    string;
@@ -24,7 +27,8 @@ export const adminSuspendUser = functions.onCall(
     if (!targetSnap.exists) throw new functions.HttpsError("not-found", "User not found.");
 
     const target = targetSnap.data()!;
-    if (target.schoolDomain !== request.auth.token.schoolDomain) {
+    // School admins can only act within their school; super admins have cross-school access
+    if (callerRole === "schooladmin" && target.schoolDomain !== request.auth.token.schoolDomain) {
       throw new functions.HttpsError("permission-denied", "Cross-school action denied.");
     }
 
@@ -81,7 +85,10 @@ export const adminUnsuspendUser = functions.onCall(
   { region: "us-central1" },
   async (request) => {
     if (!request.auth) throw new functions.HttpsError("unauthenticated", "Sign in required.");
-    if (request.auth.token.role !== "admin") throw new functions.HttpsError("permission-denied", "Admins only.");
+    const callerRole = request.auth.token.role;
+    if (!["schooladmin", "superadmin"].includes(callerRole)) {
+      throw new functions.HttpsError("permission-denied", "Admins only.");
+    }
 
     const { targetUid } = request.data as { targetUid: string };
 
@@ -89,7 +96,7 @@ export const adminUnsuspendUser = functions.onCall(
     if (!targetSnap.exists) throw new functions.HttpsError("not-found", "User not found.");
 
     const target = targetSnap.data()!;
-    if (target.schoolDomain !== request.auth.token.schoolDomain) {
+    if (callerRole === "schooladmin" && target.schoolDomain !== request.auth.token.schoolDomain) {
       throw new functions.HttpsError("permission-denied", "Cross-school action denied.");
     }
 

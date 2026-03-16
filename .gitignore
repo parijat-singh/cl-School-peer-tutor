@@ -41,3 +41,9 @@ nginx/certs/*.crt
 # Logs
 *.log
 npm-debug.log*
+
+# Claude Code worktrees and local config
+.claude/
+
+# Firebase emulator exports
+backend/firebase-export-*/
