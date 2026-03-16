@@ -145,6 +145,15 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // ── Email OTP verifications ──────────────────────────────────
+    // /emailVerifications/{userId}
+    // Written and read only by Cloud Functions (Admin SDK bypasses rules).
+    // Clients must never read or write these docs directly.
+
+    match /emailVerifications/{userId} {
+      allow read, write: if false;
+    }
+
     // ── Default deny everything else ────────────────────────────
     match /{document=**} {
       allow read, write: if false;

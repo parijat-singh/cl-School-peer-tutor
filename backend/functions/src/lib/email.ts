@@ -126,6 +126,40 @@ export async function sendRatingPrompt(params: {
   );
 }
 
+// ── Email OTP verification ───────────────────────────────────────
+
+export async function sendOtpEmail(params: {
+  to: string;
+  otp: string;
+  expiresMinutes: number;
+}) {
+  await sgMail.send({
+    to:      params.to,
+    from:    FROM,
+    subject: "Your PeerTutor verification code",
+    html: `
+      <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;background:#f8fafc;border-radius:8px">
+        <div style="text-align:center;margin-bottom:24px">
+          <span style="font-size:22px;font-weight:700;color:#1e3a5f">PeerTutor</span>
+        </div>
+        <h2 style="font-size:20px;color:#111827;margin:0 0 8px">Verify your email address</h2>
+        <p style="color:#6b7280;font-size:14px;margin:0 0 24px">
+          Enter the 6-digit code below in the app to activate your account.
+          This code expires in <strong>${params.expiresMinutes} minutes</strong>.
+        </p>
+        <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:24px;text-align:center;margin-bottom:24px">
+          <span style="font-size:40px;font-weight:700;letter-spacing:12px;color:#2563eb;font-family:monospace">
+            ${params.otp}
+          </span>
+        </div>
+        <p style="color:#9ca3af;font-size:12px;text-align:center;margin:0">
+          If you didn't create a PeerTutor account, you can safely ignore this email.
+        </p>
+      </div>
+    `,
+  });
+}
+
 // ── ICS calendar invite ──────────────────────────────────────────
 
 function generateIcs(params: {
