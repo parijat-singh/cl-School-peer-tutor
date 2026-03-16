@@ -1,5 +1,6 @@
 {
   "projects": {
-    "default": "your-firebase-project-id"
+    "default": "peertutor-prod",
+    "dev": "peertutor-dev"
   }
 }

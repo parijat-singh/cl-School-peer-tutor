@@ -39,12 +39,18 @@ export interface UserDoc {
 
 export interface AvailabilitySlot {
   id: string;
+  // Recurring weekly slot fields
+  recurring?: boolean;
   day: DayOfWeek;
   startTime: string;   // "HH:MM" 24h format
   endTime: string;
   duration: SessionDuration;
   booked: boolean;
   bookedBy?: string;   // tuteeUid when booked
+  bookedDates?: string[];      // ISO date strings for recurring slots
+  cancelledDates?: string[];   // ISO date strings cancelled by tutor
+  // Specific-date slot fields
+  date?: string;               // ISO date string for one-off slots
   schoolDomain: string;
   createdAt: Timestamp;
 }
