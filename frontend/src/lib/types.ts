@@ -167,7 +167,7 @@ export interface CancelSessionRequest {
 export interface TutorCard {
   uid: string;
   name: string;
-  grade: GradeLevel;
+  grade: GradeLevel | null;
   subjects: string[];
   bio?: string;
   avgRating: number;

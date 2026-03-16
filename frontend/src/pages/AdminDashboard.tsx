@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { useSchool } from "@/lib/school-context";
 import {
-  subscribeStats, subscribeSchoolReviews, usersCol, flagReview,
+  subscribeStats, subscribeSchoolReviews, usersCol,
   getSchoolDoc, uploadSchoolLogo, updateSchoolProfile,
 } from "@/lib/firestore";
 import { SchoolBanner } from "@/components/shared/SchoolBanner";
@@ -121,8 +121,11 @@ export default function AdminDashboard() {
       return;
     }
     try {
+      // Always activate the user when promoting — a pending user promoted to
+      // schooladmin must be active so they can actually log in.
       await updateDoc(doc(db, "users", target.uid), {
         role: "schooladmin",
+        status: "active",
         updatedAt: serverTimestamp(),
       });
       await addDoc(collection(db, "adminAuditLog"), {
@@ -135,7 +138,7 @@ export default function AdminDashboard() {
       await updateCustomClaims(target.uid, {
         role: "schooladmin",
         schoolDomain: domain,
-        status: target.status,
+        status: "active",
       });
       setToast({ msg: `${target.name} promoted to school admin`, type: "success" });
     } catch {
@@ -699,7 +702,11 @@ export default function AdminDashboard() {
         <div>
           <div className="flex items-center justify-between mb-4">
             <h2 className="font-display text-xl text-gray-900">School Administrators</h2>
-            <Button size="sm" onClick={() => setAddAdminModal(true)}>
+            <Button size="sm" onClick={() => {
+              // Pre-select the first promotable user so the button is enabled immediately
+              setAdminEmail(nonAdminUsers[0]?.email ?? "");
+              setAddAdminModal(true);
+            }}>
               <UserPlus className="w-3.5 h-3.5" /> Add Admin
             </Button>
           </div>

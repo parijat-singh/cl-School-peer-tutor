@@ -35,12 +35,35 @@ create_subdoc() {
 }
 
 # Helper: create Auth user via admin endpoint (bypasses blocking functions)
+# Deletes any pre-existing auth user with the same email before creating,
+# so re-seeding an already-used emulator always produces a clean state.
 create_auth_user() {
   local email="$1"
   local password="$2"
   local uid="$3"
   local display_name="$4"
   local custom_claims="$5"
+
+  # Look up any existing auth user with this email and delete them first
+  local existing_uid
+  existing_uid=$(curl -s -X POST \
+    "${AUTH_ADMIN_URL}/accounts:lookup" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer owner" \
+    -d "{\"email\": [\"${email}\"]}" \
+    | python -c "import json,sys; d=json.load(sys.stdin); users=d.get('users',[]); print(users[0]['localId'] if users else '',end='')" 2>/dev/null)
+
+  if [ -n "$existing_uid" ] && [ "$existing_uid" != "$uid" ]; then
+    curl -s -X POST \
+      "${AUTH_ADMIN_URL}/accounts:delete" \
+      -H "Content-Type: application/json" \
+      -H "Authorization: Bearer owner" \
+      -d "{\"localId\": \"${existing_uid}\"}" > /dev/null
+    # Also clean up the stale Firestore user doc if it differs from our target uid
+    curl -s -X DELETE \
+      "${FIRESTORE_URL}/users/${existing_uid}" \
+      -H "Authorization: Bearer owner" > /dev/null
+  fi
 
   # Create user via admin endpoint with Bearer owner (bypasses blocking functions)
   curl -s -X POST \
@@ -103,21 +126,41 @@ create_doc "schools" "lincoln.edu" '{
   "createdAt": {"timestampValue": "'"${NOW}"'"}
 }'
 
-# Pending school for super admin to approve/reject
+# Approved school — principal can log in immediately
 create_doc "schools" "riverside.edu" '{
   "domain": {"stringValue": "riverside.edu"},
   "name": {"stringValue": "Riverside Middle School"},
   "type": {"stringValue": "middle"},
-  "approved": {"booleanValue": false},
-  "status": {"stringValue": "pending"},
+  "approved": {"booleanValue": true},
+  "status": {"stringValue": "approved"},
+  "adminUid": {"stringValue": "user-principal-001"},
   "adminEmail": {"stringValue": "principal@riverside.edu"},
   "brandColor": {"stringValue": "#2D8B4E"},
+  "campus": {"stringValue": "Main Campus, 500 Riverside Dr"},
   "logoUrl": {"stringValue": ""},
   "subjects": {"arrayValue": {"values": [
     {"stringValue": "Algebra"},
     {"stringValue": "Biology"},
     {"stringValue": "English"},
     {"stringValue": "History"}
+  ]}},
+  "createdAt": {"timestampValue": "'"${NOW}"'"}
+}'
+
+# Pending school for super admin to approve/reject demo
+create_doc "schools" "westview.edu" '{
+  "domain": {"stringValue": "westview.edu"},
+  "name": {"stringValue": "Westview High School"},
+  "type": {"stringValue": "high"},
+  "approved": {"booleanValue": false},
+  "status": {"stringValue": "pending"},
+  "adminEmail": {"stringValue": "admin@westview.edu"},
+  "brandColor": {"stringValue": "#7C3AED"},
+  "logoUrl": {"stringValue": ""},
+  "subjects": {"arrayValue": {"values": [
+    {"stringValue": "Algebra"},
+    {"stringValue": "English"},
+    {"stringValue": "Chemistry"}
   ]}},
   "createdAt": {"timestampValue": "'"${NOW}"'"}
 }'
@@ -259,6 +302,34 @@ create_doc "users" "user-teacher-001" '{
   "updatedAt": {"timestampValue": "'"${NOW}"'"}
 }'
 
+# School Admin — Riverside (principal)
+create_doc "users" "user-principal-001" '{
+  "uid": {"stringValue": "user-principal-001"},
+  "name": {"stringValue": "Dr. James Rivera"},
+  "email": {"stringValue": "principal@riverside.edu"},
+  "grade": {"nullValue": null},
+  "role": {"stringValue": "schooladmin"},
+  "schoolDomain": {"stringValue": "riverside.edu"},
+  "status": {"stringValue": "active"},
+  "createdAt": {"timestampValue": "'"${NOW}"'"},
+  "updatedAt": {"timestampValue": "'"${NOW}"'"}
+}'
+
+# Riverside pending tutee — to demo the promote-to-admin flow
+create_doc "users" "user-riverside-tutee-001" '{
+  "uid": {"stringValue": "user-riverside-tutee-001"},
+  "name": {"stringValue": "Maria Gomez"},
+  "email": {"stringValue": "admin@riverside.edu"},
+  "grade": {"stringValue": "8th"},
+  "role": {"stringValue": "tutee"},
+  "schoolDomain": {"stringValue": "riverside.edu"},
+  "status": {"stringValue": "pending"},
+  "subjects": {"arrayValue": {"values": []}},
+  "bio": {"stringValue": ""},
+  "createdAt": {"timestampValue": "'"${NOW}"'"},
+  "updatedAt": {"timestampValue": "'"${NOW}"'"}
+}'
+
 # ─────────────────────────────────────────────
 # 3. Create Auth Users (AFTER user docs so blocking function can read them)
 #    Custom claims are set via emulator admin endpoint
@@ -281,6 +352,10 @@ create_auth_user "both1@lincoln.edu" "Test1234!" "user-both-001" "Taylor Morgan"
   '{"role":"both","schoolDomain":"lincoln.edu","status":"active"}'
 create_auth_user "teacher@lincoln.edu" "Test1234!" "user-teacher-001" "Ms. Rachel Davis" \
   '{"role":"teacher","schoolDomain":"lincoln.edu","status":"active"}'
+create_auth_user "principal@riverside.edu" "Test1234!" "user-principal-001" "Dr. James Rivera" \
+  '{"role":"schooladmin","schoolDomain":"riverside.edu","status":"active"}'
+create_auth_user "admin@riverside.edu" "Test1234!" "user-riverside-tutee-001" "Maria Gomez" \
+  '{"role":"tutee","schoolDomain":"riverside.edu","status":"pending"}'
 
 # ─────────────────────────────────────────────
 # 4. Create Availability Slots
@@ -613,8 +688,10 @@ echo ""
 echo "=== Seeding complete! ==="
 echo ""
 echo "Test accounts (all passwords: Test1234!):"
-echo "  Super Admin:  superadmin@peertutor.app (Parijat - cross-school)"
-echo "  School Admin: admin@lincoln.edu        (Sarah - Lincoln HS)"
+echo "  Super Admin:  superadmin@peertutor.app  (Parijat - cross-school)"
+echo "  School Admin: admin@lincoln.edu         (Sarah - Lincoln HS)"
+echo "  School Admin: principal@riverside.edu   (Dr. Rivera - Riverside MS)"
+echo "  Tutee(pending):admin@riverside.edu      (Maria - Riverside MS, promote to admin to test)"
 echo "  Tutor:        tutor1@lincoln.edu        (Marcus - Math/CS)"
 echo "  Tutor:        tutor2@lincoln.edu        (Emily - Sciences)"
 echo "  Tutee:        tutee1@lincoln.edu        (Alex)"
@@ -623,5 +700,6 @@ echo "  Both:         both1@lincoln.edu         (Taylor - English/History)"
 echo "  Teacher:      teacher@lincoln.edu       (Ms. Davis)"
 echo ""
 echo "Schools:"
-echo "  lincoln.edu    — Approved (Lincoln High School)"
-echo "  riverside.edu  — Pending  (Riverside Middle School)"
+echo "  lincoln.edu   — Approved (Lincoln High School)"
+echo "  riverside.edu — Approved (Riverside Middle School)"
+echo "  westview.edu  — Pending  (Westview High School — for super admin demo)"

@@ -17,17 +17,21 @@ const signInSchema = z.object({
 });
 
 const signUpSchema = z.object({
-  name:     z.string().min(2, "Name must be at least 2 characters"),
-  email:    z.string().email("Enter a valid email")
-              .refine(validateSchoolEmail, "Must be a school email (.edu or .k12)"),
-  password: z.string().min(8, "Password must be at least 8 characters")
-              .regex(/[A-Z]/, "Must contain an uppercase letter")
-              .regex(/[0-9]/, "Must contain a number"),
-  grade:    z.string().optional() as z.ZodType<GradeLevel | undefined>,
-  role:     z.enum(["tutor", "tutee", "both", "teacher"]) as z.ZodType<Exclude<UserRole, "schooladmin" | "superadmin">>,
+  name:            z.string().min(2, "Name must be at least 2 characters"),
+  email:           z.string().email("Enter a valid email")
+                     .refine(validateSchoolEmail, "Must be a school email (.edu or .k12)"),
+  password:        z.string().min(8, "Password must be at least 8 characters")
+                     .regex(/[A-Z]/, "Must contain an uppercase letter")
+                     .regex(/[0-9]/, "Must contain a number"),
+  confirmPassword: z.string().min(1, "Please confirm your password"),
+  grade:           z.string().optional() as z.ZodType<GradeLevel | undefined>,
+  role:            z.enum(["tutor", "tutee", "both", "teacher"]) as z.ZodType<Exclude<UserRole, "schooladmin" | "superadmin">>,
 }).refine((data) => data.role === "teacher" || (data.grade && data.grade.length > 0), {
   message: "Select your grade",
   path: ["grade"],
+}).refine((data) => data.password === data.confirmPassword, {
+  message: "Passwords do not match",
+  path: ["confirmPassword"],
 });
 
 type SignInForm = z.infer<typeof signInSchema>;
@@ -223,6 +227,13 @@ export default function AuthPage() {
                 hint="Min 8 chars, one uppercase, one number"
                 error={signUpForm.formState.errors.password?.message}
                 {...signUpForm.register("password")}
+              />
+              <Input
+                label="Confirm Password"
+                type="password"
+                placeholder="••••••••"
+                error={signUpForm.formState.errors.confirmPassword?.message}
+                {...signUpForm.register("confirmPassword")}
               />
 
               <Select

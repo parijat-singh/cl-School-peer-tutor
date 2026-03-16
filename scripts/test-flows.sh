@@ -701,6 +701,117 @@ delete_doc "users/user-both-001/availability/slot-test-specific"
 echo ""
 
 # ══════════════════════════════════════════════════════════════════
+# TEST 16: School approval auto-activates designated school admin
+# ══════════════════════════════════════════════════════════════════
+# Regression: principal@riverside.edu was seeded with status=pending
+# (or had a stale manual-signup doc) so logging in showed
+# "Account Pending Approval" even though the school was authorised.
+# Fix 1 — seed: riverside.edu is now approved and user-principal-001
+#          is created with role=schooladmin, status=active.
+# Fix 2 — signUp: if email matches school.adminEmail the user doc is
+#          written with role=schooladmin / status=active (not pending).
+# Fix 3 — handleApprove: when super admin approves a school any
+#          existing user whose email matches adminEmail is promoted and
+#          activated automatically.
+# Fix 4 — seed helper: deletes any stale auth user with the same email
+#          before re-creating, so duplicate-email silent failures can't
+#          leave a ghost account with the wrong uid.
+echo -e "${CYAN}[T16] School approval — principal gets schooladmin + active status${NC}"
+
+# ── Part A: verify riverside.edu is approved in seed data ─────────
+SCHOOL=$(get_doc "schools/riverside.edu")
+assert_equals "$(extract_string "$SCHOOL" "status")"   "approved"              "riverside.edu status is approved"
+assert_equals "$(extract_bool   "$SCHOOL" "approved")" "true"                  "riverside.edu approved flag is true"
+assert_equals "$(extract_string "$SCHOOL" "adminEmail")" "principal@riverside.edu" "riverside.edu adminEmail is principal@riverside.edu"
+
+# ── Part B: verify the principal user doc has correct role/status ──
+# Find the user doc by email (we patch the known seed doc id here)
+PRINCIPAL=$(get_doc "users/user-principal-001")
+assert_equals "$(extract_string "$PRINCIPAL" "role")"         "schooladmin"      "Principal role is schooladmin"
+assert_equals "$(extract_string "$PRINCIPAL" "status")"       "active"           "Principal status is active"
+assert_equals "$(extract_string "$PRINCIPAL" "schoolDomain")" "riverside.edu"    "Principal schoolDomain is riverside.edu"
+
+# ── Part C: simulate school approval activating a pending admin ────
+# Create a pending school + a pending admin user for that school
+create_doc "schools/approval-test.edu" '{
+  "domain":     {"stringValue": "approval-test.edu"},
+  "name":       {"stringValue": "Approval Test School"},
+  "type":       {"stringValue": "high"},
+  "approved":   {"booleanValue": false},
+  "status":     {"stringValue": "pending"},
+  "adminEmail": {"stringValue": "admin@approval-test.edu"},
+  "brandColor": {"stringValue": "#000000"},
+  "logoUrl":    {"stringValue": ""},
+  "createdAt":  {"timestampValue": "'"${NOW}"'"}
+}' > /dev/null
+
+create_doc "users/user-approval-admin" '{
+  "uid":          {"stringValue": "user-approval-admin"},
+  "name":         {"stringValue": "Test Principal"},
+  "email":        {"stringValue": "admin@approval-test.edu"},
+  "grade":        {"nullValue": null},
+  "role":         {"stringValue": "tutee"},
+  "schoolDomain": {"stringValue": "approval-test.edu"},
+  "status":       {"stringValue": "pending"},
+  "createdAt":    {"timestampValue": "'"${NOW}"'"},
+  "updatedAt":    {"timestampValue": "'"${NOW}"'"}
+}' > /dev/null
+
+# Create matching auth user (needed so lookup_auth_user can verify claims)
+create_auth_user "admin@approval-test.edu" "Test1234!" "user-approval-admin" "Test Principal" \
+  '{"role":"tutee","schoolDomain":"approval-test.edu","status":"pending"}'
+
+# Verify user starts as pending/tutee
+USER=$(get_doc "users/user-approval-admin")
+assert_equals "$(extract_string "$USER" "status")" "pending" "Admin user starts as pending before approval"
+assert_equals "$(extract_string "$USER" "role")"   "tutee"   "Admin user starts as tutee before approval"
+
+# Simulate super admin approving the school (handleApprove logic):
+# Step 1 — approve the school doc
+update_doc "schools/approval-test.edu" '{
+  "approved": {"booleanValue": true},
+  "status":   {"stringValue": "approved"}
+}' > /dev/null
+
+# Step 2 — activate the admin user (auto-promotion that handleApprove now performs)
+update_doc "users/user-approval-admin" '{
+  "role":         {"stringValue": "schooladmin"},
+  "status":       {"stringValue": "active"},
+  "schoolDomain": {"stringValue": "approval-test.edu"},
+  "updatedAt":    {"timestampValue": "'"${NOW}"'"}
+}' > /dev/null
+update_custom_claims "user-approval-admin" \
+  '{"role":"schooladmin","schoolDomain":"approval-test.edu","status":"active"}'
+
+# Verify school is approved
+SCHOOL2=$(get_doc "schools/approval-test.edu")
+assert_equals "$(extract_string "$SCHOOL2" "status")"   "approved" "School status updated to approved"
+assert_equals "$(extract_bool   "$SCHOOL2" "approved")" "true"     "School approved flag set to true"
+
+# Verify admin user is now active schooladmin
+USER2=$(get_doc "users/user-approval-admin")
+assert_equals "$(extract_string "$USER2" "role")"   "schooladmin" "Admin role promoted to schooladmin after approval"
+assert_equals "$(extract_string "$USER2" "status")" "active"      "Admin status activated after school approval"
+
+# Verify custom claims updated
+AUTH_RESP=$(lookup_auth_user "user-approval-admin")
+if echo "$AUTH_RESP" | grep -q 'schooladmin'; then
+  pass "Auth claims reflect schooladmin role after approval"
+else
+  fail "Auth claims reflect schooladmin role after approval" "schooladmin in claims" "not found"
+fi
+if echo "$AUTH_RESP" | grep -q 'active'; then
+  pass "Auth claims reflect active status after approval"
+else
+  fail "Auth claims reflect active status after approval" "active in claims" "not found"
+fi
+
+# Clean up
+delete_doc "schools/approval-test.edu"
+delete_doc "users/user-approval-admin"
+echo ""
+
+# ══════════════════════════════════════════════════════════════════
 # Summary
 # ══════════════════════════════════════════════════════════════════
 

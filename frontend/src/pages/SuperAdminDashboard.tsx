@@ -1,12 +1,12 @@
 // src/pages/SuperAdminDashboard.tsx
 import { useState, useEffect } from "react";
 import { useAuth } from "@/lib/auth-context";
-import { subscribeAllSchools, subscribeAllSuperAdmins, usersCol, schoolsCol } from "@/lib/firestore";
+import { subscribeAllSchools, subscribeAllSuperAdmins, usersCol } from "@/lib/firestore";
 import {
   Button, Input, Select, Modal, Toast, Badge, Divider,
 } from "@/components/shared/ui";
 import type { SchoolDoc, SchoolStatus, UserDoc } from "@/lib/types";
-import { query, where, getDocs, doc, setDoc, updateDoc, deleteDoc, serverTimestamp, collection, addDoc } from "firebase/firestore";
+import { query, where, getDocs, doc, setDoc, updateDoc, serverTimestamp, collection, addDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import {
   Crown, CheckCircle, XCircle, Trash2,
@@ -104,7 +104,29 @@ export default function SuperAdminDashboard() {
 
   const handleApprove = async (domain: string) => {
     try {
+      const schoolDoc = schools.find((s) => s.domain === domain);
       await updateDoc(doc(db, "schools", domain), { approved: true, status: "approved" });
+
+      // Auto-activate the designated school admin if they already have an account
+      if (schoolDoc?.adminEmail) {
+        const q = query(usersCol(), where("email", "==", schoolDoc.adminEmail));
+        const snap = await getDocs(q);
+        if (!snap.empty) {
+          const adminUid = snap.docs[0].id;
+          await updateDoc(doc(db, "users", adminUid), {
+            role: "schooladmin",
+            status: "active",
+            schoolDomain: domain,
+            updatedAt: serverTimestamp(),
+          });
+          await updateCustomClaims(adminUid, {
+            role: "schooladmin",
+            schoolDomain: domain,
+            status: "active",
+          });
+        }
+      }
+
       setToast({ msg: `${domain} approved`, type: "success" });
     } catch {
       setToast({ msg: "Approve failed", type: "error" });

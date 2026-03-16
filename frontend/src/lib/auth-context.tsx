@@ -97,19 +97,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const credential = await createUserWithEmailAndPassword(auth, email, password);
     const { uid } = credential.user;
 
+    // If this email is the designated school admin, auto-activate with schooladmin role
+    const isSchoolAdmin =
+      schoolData.adminEmail != null &&
+      schoolData.adminEmail.toLowerCase() === email.toLowerCase();
+
     // Write user document — Cloud Function will also set custom claims
     await setDoc(doc(db, "users", uid), {
       name,
       email,
-      grade,
-      role,
+      grade: isSchoolAdmin ? null : grade,
+      role: isSchoolAdmin ? "schooladmin" : role,
       schoolDomain: domain,
-      status: "pending",
+      status: isSchoolAdmin ? "active" : "pending",
       subjects: [],
       bio: "",
       avgRating: 0,
       reviewCount: 0,
-      isActive: role === "tutor" || role === "both",
+      isActive: !isSchoolAdmin && (role === "tutor" || role === "both"),
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
