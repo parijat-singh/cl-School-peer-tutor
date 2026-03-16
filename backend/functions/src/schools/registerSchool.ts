@@ -3,10 +3,8 @@
 // Creates school doc in "pending" state; ops team approves it
 
 import * as functions from "firebase-functions/v2/https";
+import * as nodemailer from "nodemailer";
 import { db, FieldValue } from "../lib/admin";
-import * as sgMail from "@sendgrid/mail";
-
-sgMail.setApiKey(process.env.SENDGRID_API_KEY!);
 
 export const registerSchool = functions.onCall(
   { region: "us-central1" },
@@ -52,21 +50,20 @@ export const registerSchool = functions.onCall(
 
     // Notify all super admins
     try {
-      const superAdmins = await db.collection("users")
-        .where("role", "==", "superadmin")
-        .get();
-      const emails = superAdmins.docs
-        .map((d) => d.data().email)
-        .filter(Boolean);
-
-      if (emails.length > 0) {
-        await sgMail.send({
-          to:      emails,
-          from:    { email: "noreply@peertutor.app", name: "PeerTutor" },
-          subject: `New school registration: ${name} (${domain})`,
-          text:    `School: ${name}\nDomain: ${domain}\nType: ${type}\nAdmin: ${adminEmail}\n\nApprove in the Super Admin dashboard.`,
-        });
-      }
+      const smtpPort = Number(process.env.SMTP_PORT ?? "465");
+      const t = nodemailer.createTransport({
+        host:   process.env.SMTP_HOST ?? "smtp.resend.com",
+        port:   smtpPort,
+        secure: smtpPort === 465,
+        auth:   { user: process.env.SMTP_USER ?? "", pass: process.env.SMTP_PASS ?? "" },
+        tls:    { rejectUnauthorized: false },
+      });
+      await t.sendMail({
+        from:    `"${process.env.SMTP_FROM_NAME ?? "PeerTutor"}" <${process.env.SMTP_FROM_EMAIL ?? ""}>`,
+        to:      superAdmin,
+        subject: `New school registration: ${name} (${domain})`,
+        text:    `School: ${name}\nDomain: ${domain}\nType: ${type}\nAdmin: ${adminEmail}\n\nApprove at: https://schoolpeertutor.com/admin/schools/${domain}`,
+      });
     } catch (err) {
       console.error("Super admin notification email failed:", err);
     }

@@ -9,6 +9,7 @@ import {
   type User as FirebaseUser,
 } from "firebase/auth";
 import { doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore";
+import { getFunctions, httpsCallable } from "firebase/functions";
 import { auth, db } from "./firebase";
 import { getUserDoc } from "./firestore";
 import type { AuthUser, UserRole, GradeLevel } from "./types";
@@ -21,6 +22,8 @@ interface AuthContextValue {
   signUp: (params: SignUpParams) => Promise<void>;
   logOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
+  sendVerificationOtp: () => Promise<void>;
+  verifyOtp: (otp: string) => Promise<void>;
 }
 
 interface SignUpParams {
@@ -128,9 +131,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await sendPasswordResetEmail(auth, email);
   };
 
+  const sendVerificationOtp = async () => {
+    const fns = getFunctions();
+    const fn  = httpsCallable(fns, "sendVerificationOtp");
+    await fn();
+  };
+
+  const verifyOtp = async (otp: string) => {
+    const fns = getFunctions();
+    const fn  = httpsCallable(fns, "verifyEmailOtp");
+    await fn({ otp });
+    // Force token refresh so custom claims (status: active) take effect immediately
+    if (auth.currentUser) {
+      await auth.currentUser.getIdToken(true);
+      const userDoc = await getUserDoc(auth.currentUser.uid);
+      if (userDoc) {
+        setCurrentUser({
+          uid:          auth.currentUser.uid,
+          email:        auth.currentUser.email!,
+          name:         userDoc.name,
+          role:         userDoc.role,
+          grade:        userDoc.grade,
+          schoolDomain: userDoc.schoolDomain,
+          status:       userDoc.status,
+        });
+      }
+    }
+  };
+
   return (
     <AuthContext.Provider
-      value={{ currentUser, firebaseUser, loading, signIn, signUp, logOut, resetPassword }}
+      value={{ currentUser, firebaseUser, loading, signIn, signUp, logOut, resetPassword, sendVerificationOtp, verifyOtp }}
     >
       {children}
     </AuthContext.Provider>

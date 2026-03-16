@@ -18,6 +18,7 @@ const RateSession     = lazy(() => import("@/pages/RateSession"));
 const OnboardRole     = lazy(() => import("@/pages/OnboardRole"));
 const SuperAdminDashboard = lazy(() => import("@/pages/SuperAdminDashboard"));
 const TeacherHome     = lazy(() => import("@/pages/TeacherHome"));
+const ContactPage     = lazy(() => import("@/pages/ContactPage"));
 const NotFound        = lazy(() => import("@/pages/NotFound"));
 
 function AppRoutes() {
@@ -31,6 +32,7 @@ function AppRoutes() {
         {/* Public */}
         <Route path="/" element={<Layout />}>
           <Route index element={<LandingPage />} />
+          <Route path="contact" element={<ContactPage />} />
           <Route
             path="auth"
             element={currentUser ? <Navigate to="/dashboard" replace /> : <AuthPage />}

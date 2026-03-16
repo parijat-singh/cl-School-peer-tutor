@@ -33,6 +33,6 @@ EXPOSE 4000 5001 8080 9099 9199
 
 CMD firebase emulators:start \
     --only auth,firestore,functions,storage \
-    --project $FIREBASE_PROJECT_ID \
+    --project ${FIREBASE_PROJECT_ID:-peertutor-dev} \
     --export-on-exit=/app/.firebase-data \
     --import=/app/.firebase-data

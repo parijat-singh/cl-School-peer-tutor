@@ -39,18 +39,18 @@ export interface UserDoc {
 
 export interface AvailabilitySlot {
   id: string;
-  // Recurring weekly slot fields
-  recurring?: boolean;
-  day: DayOfWeek;
-  startTime: string;   // "HH:MM" 24h format
+  recurring: boolean;           // true = repeats every week on `day`
+  day: DayOfWeek;               // always set (derived from `date` for one-off)
+  date?: string;                // "YYYY-MM-DD" — set for one-off slots only
+  startTime: string;            // "HH:MM" 24h format
   endTime: string;
   duration: SessionDuration;
+  // One-off slot booking state
   booked: boolean;
-  bookedBy?: string;   // tuteeUid when booked
-  bookedDates?: string[];      // ISO date strings for recurring slots
-  cancelledDates?: string[];   // ISO date strings cancelled by tutor
-  // Specific-date slot fields
-  date?: string;               // ISO date string for one-off slots
+  bookedBy?: string;            // tuteeUid when booked (one-off only)
+  // Recurring slot booking state
+  bookedDates?: Record<string, string>;   // { "YYYY-MM-DD": tuteeUid } for recurring
+  cancelledDates?: string[];              // dates the tutor cancelled for recurring
   schoolDomain: string;
   createdAt: Timestamp;
 }
@@ -167,12 +167,15 @@ export interface CancelSessionRequest {
 export interface TutorCard {
   uid: string;
   name: string;
-  grade: GradeLevel;
+  grade: GradeLevel | null;
   subjects: string[];
   bio?: string;
   avgRating: number;
   reviewCount: number;
   availableSlots: AvailabilitySlot[];
+  // AI recommendation fields (populated after search)
+  aiScore?: number;
+  aiReason?: string;
 }
 
 export interface AuthUser {

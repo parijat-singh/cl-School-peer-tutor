@@ -6,7 +6,7 @@ import { getTutorReviews, subscribeTutorSlots } from "@/lib/firestore";
 import { Button, Badge, StarRating } from "@/components/shared/ui";
 import type { UserDoc, ReviewDoc, AvailabilitySlot } from "@/lib/types";
 import { useAuth } from "@/lib/auth-context";
-import { Star, Clock } from "lucide-react";
+import { Star } from "lucide-react";
 import { format } from "date-fns";
 
 export default function TutorProfile() {

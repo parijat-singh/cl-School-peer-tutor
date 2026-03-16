@@ -1,7 +1,9 @@
-# Environment
+# Environment — NEVER commit secrets
 .env
 .env.local
 .env.production
+.env.staging
+.env.*.local
 
 # Dependencies
 node_modules/
@@ -11,10 +13,12 @@ node_modules/
 dist/
 build/
 .firebase/
-functions/lib/
+**/functions/lib/
 
 # Firebase
 .firebase-data/
+firebase-export-*/
+**/firebase-export-*/
 firebase-debug.log
 firestore-debug.log
 ui-debug.log

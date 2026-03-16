@@ -1,16 +1,18 @@
 // src/pages/SuperAdminDashboard.tsx
 import { useState, useEffect } from "react";
 import { useAuth } from "@/lib/auth-context";
-import { subscribeAllSchools, subscribeAllSuperAdmins, usersCol, schoolsCol } from "@/lib/firestore";
+import { subscribeAllSchools, subscribeAllSuperAdmins, usersCol } from "@/lib/firestore";
+import { updatePassword, reauthenticateWithCredential, EmailAuthProvider } from "firebase/auth";
+import { auth } from "@/lib/firebase";
 import {
   Button, Input, Select, Modal, Toast, Badge, Divider,
 } from "@/components/shared/ui";
 import type { SchoolDoc, SchoolStatus, UserDoc } from "@/lib/types";
-import { query, where, getDocs, doc, setDoc, updateDoc, deleteDoc, serverTimestamp, collection, addDoc } from "firebase/firestore";
+import { query, where, getDocs, doc, setDoc, updateDoc, serverTimestamp, collection, addDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import {
   Crown, CheckCircle, XCircle, Trash2,
-  UserPlus, Building, Plus, RefreshCw, Pencil, Shield,
+  UserPlus, Building, Plus, RefreshCw, Pencil, Shield, KeyRound,
 } from "lucide-react";
 
 const projectId = import.meta.env.VITE_FIREBASE_PROJECT_ID || "peertutor-dev";
@@ -87,6 +89,12 @@ export default function SuperAdminDashboard() {
   const [schoolFilter, setSchoolFilter] = useState<"all" | "pending" | "approved" | "rejected">("all");
 
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
+
+  // Change password modal
+  const [pwModal, setPwModal] = useState(false);
+  const [pwForm, setPwForm] = useState({ current: "", next: "", confirm: "" });
+  const [pwLoading, setPwLoading] = useState(false);
+  const [pwError, setPwError] = useState("");
 
   useEffect(() => {
     const u1 = subscribeAllSchools(setSchools);
@@ -310,17 +318,54 @@ export default function SuperAdminDashboard() {
     setNewSchool((prev) => ({ ...prev, [field]: value }));
   };
 
+  const handleChangePassword = async () => {
+    setPwError("");
+    if (pwForm.next.length < 8) { setPwError("New password must be at least 8 characters"); return; }
+    if (!/[A-Z]/.test(pwForm.next)) { setPwError("Must contain an uppercase letter"); return; }
+    if (!/[0-9]/.test(pwForm.next)) { setPwError("Must contain a number"); return; }
+    if (pwForm.next !== pwForm.confirm) { setPwError("Passwords do not match"); return; }
+
+    const firebaseUser = auth.currentUser;
+    if (!firebaseUser?.email) { setPwError("No authenticated user"); return; }
+
+    setPwLoading(true);
+    try {
+      const credential = EmailAuthProvider.credential(firebaseUser.email, pwForm.current);
+      await reauthenticateWithCredential(firebaseUser, credential);
+      await updatePassword(firebaseUser, pwForm.next);
+      setPwModal(false);
+      setPwForm({ current: "", next: "", confirm: "" });
+      setToast({ msg: "Password changed successfully", type: "success" });
+    } catch (e: unknown) {
+      const code = (e as { code?: string }).code;
+      if (code === "auth/wrong-password" || code === "auth/invalid-credential") {
+        setPwError("Current password is incorrect");
+      } else if (code === "auth/too-many-requests") {
+        setPwError("Too many attempts. Try again later");
+      } else {
+        setPwError("Failed to change password. Try signing out and back in first");
+      }
+    } finally {
+      setPwLoading(false);
+    }
+  };
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
       {/* Header */}
-      <div className="mb-6">
-        <div className="flex items-center gap-2 mb-1">
-          <Crown className="w-5 h-5 text-amber-500" />
-          <h1 className="font-display text-3xl text-gray-900">Super Admin</h1>
+      <div className="mb-6 flex items-start justify-between">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <Crown className="w-5 h-5 text-amber-500" />
+            <h1 className="font-display text-3xl text-gray-900">Super Admin</h1>
+          </div>
+          <p className="text-gray-500 text-sm">
+            Manage schools, domains, and administrators
+          </p>
         </div>
-        <p className="text-gray-500 text-sm">
-          Manage schools, domains, and administrators
-        </p>
+        <Button size="sm" variant="ghost" onClick={() => { setPwForm({ current: "", next: "", confirm: "" }); setPwError(""); setPwModal(true); }}>
+          <KeyRound className="w-3.5 h-3.5" /> Change Password
+        </Button>
       </div>
 
       {/* Tab nav */}
@@ -756,6 +801,50 @@ export default function SuperAdminDashboard() {
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* ── Change Password Modal ── */}
+      <Modal open={pwModal} onClose={() => setPwModal(false)} title="Change Password">
+        <div className="flex flex-col gap-4">
+          <p className="text-sm text-gray-600">
+            Enter your current password to verify, then set a new one.
+          </p>
+          <Input
+            label="Current Password"
+            type="password"
+            placeholder="Your current password"
+            value={pwForm.current}
+            onChange={(e) => setPwForm((p) => ({ ...p, current: e.target.value }))}
+          />
+          <Input
+            label="New Password"
+            type="password"
+            placeholder="Min 8 chars, one uppercase, one number"
+            value={pwForm.next}
+            onChange={(e) => setPwForm((p) => ({ ...p, next: e.target.value }))}
+          />
+          <Input
+            label="Confirm New Password"
+            type="password"
+            placeholder="Repeat new password"
+            value={pwForm.confirm}
+            onChange={(e) => setPwForm((p) => ({ ...p, confirm: e.target.value }))}
+          />
+          {pwError && (
+            <p className="text-sm text-red-600">{pwError}</p>
+          )}
+          <Divider />
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setPwModal(false)}>Cancel</Button>
+            <Button
+              onClick={handleChangePassword}
+              loading={pwLoading}
+              disabled={!pwForm.current || !pwForm.next || !pwForm.confirm}
+            >
+              <KeyRound className="w-3.5 h-3.5" /> Update Password
+            </Button>
+          </div>
+        </div>
       </Modal>
 
       {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}

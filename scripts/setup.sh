@@ -2,6 +2,8 @@
 # scripts/setup.sh — PeerTutor local setup
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
 echo "🎓 PeerTutor Setup"
 echo "=================="
 
@@ -15,11 +17,22 @@ fi
 if [ ! -f ".env" ]; then
   cp .env.example .env
   echo "⚠️  Created .env from .env.example"
-  echo "    Edit .env with your Firebase project values, then re-run this script."
+  echo "    Edit .env with your project values, then re-run this script."
   exit 0
 fi
 
 echo "✅ .env found"
+
+# Install git hooks (sync-env pre-commit, secret blocker)
+echo ""
+echo "📎 Installing git hooks..."
+bash "$SCRIPT_DIR/install-hooks.sh"
+
+# Sync .env.example with .env (strip secrets, add missing keys)
+echo ""
+echo "🔄 Syncing .env.example..."
+bash "$SCRIPT_DIR/sync-env.sh"
+
 echo ""
 echo "🚀 Starting PeerTutor..."
 docker-compose up --build

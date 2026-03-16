@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { useSchool } from "@/lib/school-context";
 import {
-  subscribeStats, subscribeSchoolReviews, usersCol, flagReview,
+  subscribeStats, subscribeSchoolReviews, usersCol,
   getSchoolDoc, uploadSchoolLogo, updateSchoolProfile,
 } from "@/lib/firestore";
 import { SchoolBanner } from "@/components/shared/SchoolBanner";

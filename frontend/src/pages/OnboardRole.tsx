@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth-context";
-import { Button, Badge } from "@/components/shared/ui";
+import { Button } from "@/components/shared/ui";
 import { BookOpen, Search, ArrowRight } from "lucide-react";
 
 const DEFAULT_SUBJECTS = [

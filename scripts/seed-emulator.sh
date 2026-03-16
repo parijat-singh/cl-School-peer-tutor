@@ -315,6 +315,21 @@ create_doc "users" "user-principal-001" '{
   "updatedAt": {"timestampValue": "'"${NOW}"'"}
 }'
 
+# Riverside pending tutee — to demo the promote-to-admin flow
+create_doc "users" "user-riverside-tutee-001" '{
+  "uid": {"stringValue": "user-riverside-tutee-001"},
+  "name": {"stringValue": "Maria Gomez"},
+  "email": {"stringValue": "admin@riverside.edu"},
+  "grade": {"stringValue": "8th"},
+  "role": {"stringValue": "tutee"},
+  "schoolDomain": {"stringValue": "riverside.edu"},
+  "status": {"stringValue": "pending"},
+  "subjects": {"arrayValue": {"values": []}},
+  "bio": {"stringValue": ""},
+  "createdAt": {"timestampValue": "'"${NOW}"'"},
+  "updatedAt": {"timestampValue": "'"${NOW}"'"}
+}'
+
 # ─────────────────────────────────────────────
 # 3. Create Auth Users (AFTER user docs so blocking function can read them)
 #    Custom claims are set via emulator admin endpoint
@@ -339,6 +354,8 @@ create_auth_user "teacher@lincoln.edu" "Test1234!" "user-teacher-001" "Ms. Rache
   '{"role":"teacher","schoolDomain":"lincoln.edu","status":"active"}'
 create_auth_user "principal@riverside.edu" "Test1234!" "user-principal-001" "Dr. James Rivera" \
   '{"role":"schooladmin","schoolDomain":"riverside.edu","status":"active"}'
+create_auth_user "admin@riverside.edu" "Test1234!" "user-riverside-tutee-001" "Maria Gomez" \
+  '{"role":"tutee","schoolDomain":"riverside.edu","status":"pending"}'
 
 # ─────────────────────────────────────────────
 # 4. Create Availability Slots
@@ -674,6 +691,7 @@ echo "Test accounts (all passwords: Test1234!):"
 echo "  Super Admin:  superadmin@peertutor.app  (Parijat - cross-school)"
 echo "  School Admin: admin@lincoln.edu         (Sarah - Lincoln HS)"
 echo "  School Admin: principal@riverside.edu   (Dr. Rivera - Riverside MS)"
+echo "  Tutee(pending):admin@riverside.edu      (Maria - Riverside MS, promote to admin to test)"
 echo "  Tutor:        tutor1@lincoln.edu        (Marcus - Math/CS)"
 echo "  Tutor:        tutor2@lincoln.edu        (Emily - Sciences)"
 echo "  Tutee:        tutee1@lincoln.edu        (Alex)"

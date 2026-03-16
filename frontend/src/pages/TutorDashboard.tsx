@@ -33,7 +33,7 @@ import {
   PlusCircle, Trash2, Video, Clock, BookOpen, Star, Users, Calendar,
   Repeat, CalendarDays, X as XIcon, Edit2, LayoutList,
 } from "lucide-react";
-import { format, addDays } from "date-fns";
+import { format } from "date-fns";
 
 // ── Subjects list ──
 const DEFAULT_SUBJECTS = [
@@ -170,7 +170,7 @@ export default function TutorDashboard() {
         startTime: data.startTime,
         endTime: addMinutes(data.startTime, dur),
         duration: dur,
-        schoolDomain: currentUser.schoolDomain,
+        schoolDomain: currentUser.schoolDomain ?? "",
       });
       slotForm.reset({ duration: "60", slotType: "recurring", startTime: "09:00" });
       setSlotModal(false);
@@ -307,7 +307,8 @@ export default function TutorDashboard() {
 
   const upcoming  = sessions.filter((s) => s.status === "upcoming");
   const completed = sessions.filter((s) => s.status === "completed");
-  const unrated   = completed.filter((s) => !s.tutorRated);
+  // unrated sessions are shown inline in the completed list
+  void completed.filter((s) => !s.tutorRated);
 
   // Separate slots into recurring and one-off
   const recurringSlots = slots.filter((s) => s.recurring);

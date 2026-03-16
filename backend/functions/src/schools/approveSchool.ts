@@ -1,35 +1,11 @@
-// functions/src/schools/approveSchool.ts
-import * as functions from "firebase-functions/v2/https";
-import { db, FieldValue } from "../lib/admin";
+import { onCall, HttpsError } from "firebase-functions/v2/https";
+import { getFirestore } from "firebase-admin/firestore";
 
-export const approveSchool = functions.onCall(
-  { region: "us-central1" },
-  async (request) => {
-    if (!request.auth) throw new functions.HttpsError("unauthenticated", "Sign in required.");
-    if (request.auth.token.role !== "superadmin") {
-      throw new functions.HttpsError("permission-denied", "Super admins only.");
-    }
-
-    const { domain } = request.data as { domain: string };
-    if (!domain) throw new functions.HttpsError("invalid-argument", "domain required.");
-
-    const schoolSnap = await db.collection("schools").doc(domain).get();
-    if (!schoolSnap.exists) throw new functions.HttpsError("not-found", "School not found.");
-
-    await db.runTransaction(async (txn) => {
-      txn.update(db.collection("schools").doc(domain), {
-        approved: true,
-      });
-
-      txn.set(db.collection("adminAuditLog").doc(), {
-        adminUid:    request.auth!.uid,
-        action:      "approve_school",
-        targetId:    domain,
-        schoolDomain: domain,
-        timestamp:   FieldValue.serverTimestamp(),
-      });
-    });
-
-    return { success: true };
-  }
-);
+export const approveSchool = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Sign in required");
+  const { domain } = request.data;
+  if (!domain) throw new HttpsError("invalid-argument", "domain required");
+  const db = getFirestore();
+  await db.doc(`schools/${domain}`).update({ approved: true, status: "approved" });
+  return { success: true };
+});
