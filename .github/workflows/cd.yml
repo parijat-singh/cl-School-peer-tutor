@@ -152,6 +152,7 @@ jobs:
       # ── Notify success ────────────────────────────────────────────────────
       - name: Send deployment success email
         if: success()
+        continue-on-error: true
         env:
           GH_SHA:     ${{ inputs.sha || github.event.workflow_run.head_sha || github.sha }}
           GH_TITLE:   ${{ github.event.workflow_run.display_title || 'manual dispatch' }}
@@ -160,20 +161,22 @@ jobs:
         run: |
           SHORT_SHA="${GH_SHA:0:7}"
           HTML="<div style='font-family:sans-serif;max-width:600px'><div style='background:#2563eb;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0'><h2 style='margin:0'>Production Deployment Successful</h2><p style='margin:8px 0 0;opacity:0.9'>schoolpeertutor.com is now live</p></div><div style='padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px'><table style='width:100%;border-collapse:collapse'><tr><td style='padding:8px 0;color:#6b7280;width:160px'>Commit</td><td style='padding:8px 0;font-family:monospace'>${SHORT_SHA}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Message</td><td style='padding:8px 0'>${GH_TITLE}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>CloudFront ID</td><td style='padding:8px 0'>${CF_ID}</td></tr></table><div style='margin-top:20px'><a href='https://schoolpeertutor.com' style='background:#2563eb;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block'>View Live Site</a></div></div></div>"
-          jq -n \
+          RESPONSE=$(jq -n \
             --arg from    "SPT Admin <$SMTP_FROM_EMAIL>" \
             --arg to      "$SUPER_ADMIN_EMAIL" \
             --arg subject "Deployed to Production - $SHORT_SHA" \
             --arg html    "$HTML" \
           '{from:$from,to:[$to],subject:$subject,html:$html}' \
-          | curl -sf -X POST https://api.resend.com/emails \
+          | curl -s --fail-with-body -X POST https://api.resend.com/emails \
               -H "Authorization: Bearer $SMTP_PASS" \
               -H "Content-Type: application/json" \
-              -d @-
+              -d @-)
+          echo "$RESPONSE"
 
       # ── Notify failure ────────────────────────────────────────────────────
       - name: Send deployment failure email
         if: failure()
+        continue-on-error: true
         env:
           GH_SHA:     ${{ inputs.sha || github.event.workflow_run.head_sha || github.sha }}
           GH_TITLE:   ${{ github.event.workflow_run.display_title || 'manual dispatch' }}
@@ -181,13 +184,14 @@ jobs:
         run: |
           SHORT_SHA="${GH_SHA:0:7}"
           HTML="<div style='font-family:sans-serif;max-width:600px'><div style='background:#dc2626;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0'><h2 style='margin:0'>Production Deployment Failed</h2><p style='margin:8px 0 0;opacity:0.9'>CI passed but deploy failed - site is unchanged</p></div><div style='padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px'><p>Commit: ${SHORT_SHA}</p><p>Message: ${GH_TITLE}</p><a href='${GH_RUN_URL}' style='background:#dc2626;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block'>View Failure Logs</a></div></div>"
-          jq -n \
+          RESPONSE=$(jq -n \
             --arg from    "SPT Admin <$SMTP_FROM_EMAIL>" \
             --arg to      "$SUPER_ADMIN_EMAIL" \
             --arg subject "DEPLOY FAILED - Production deployment error" \
             --arg html    "$HTML" \
           '{from:$from,to:[$to],subject:$subject,html:$html}' \
-          | curl -sf -X POST https://api.resend.com/emails \
+          | curl -s --fail-with-body -X POST https://api.resend.com/emails \
               -H "Authorization: Bearer $SMTP_PASS" \
               -H "Content-Type: application/json" \
-              -d @-
+              -d @-)
+          echo "$RESPONSE"

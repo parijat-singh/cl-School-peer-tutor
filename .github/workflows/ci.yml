@@ -161,6 +161,7 @@ jobs:
         run: echo "All checks passed - safe to deploy"
 
       - name: Send CI success email
+        continue-on-error: true
         env:
           GH_SHA:            ${{ github.sha }}
           GH_BRANCH:         ${{ github.ref_name }}
@@ -172,17 +173,20 @@ jobs:
           SUPER_ADMIN_EMAIL: ${{ secrets.SUPER_ADMIN_EMAIL }}
         run: |
           SHORT_SHA="${GH_SHA:0:7}"
-          HTML="<div style='font-family:sans-serif;max-width:600px'><div style='background:#16a34a;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0'><h2 style='margin:0'>CI Pipeline Passed</h2></div><div style='padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px'><table style='width:100%;border-collapse:collapse'><tr><td style='padding:8px 0;color:#6b7280;width:140px'>Branch</td><td style='padding:8px 0;font-weight:600'>${GH_BRANCH}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Commit</td><td style='padding:8px 0;font-family:monospace'>${SHORT_SHA}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Author</td><td style='padding:8px 0'>${GH_ACTOR}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Message</td><td style='padding:8px 0'>${GH_MSG}</td></tr></table><div style='margin-top:20px'><a href='${GH_RUN_URL}' style='background:#2563eb;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block'>View Run</a></div><p style='color:#6b7280;font-size:13px;margin-top:20px'>All 4 checks passed: Secrets scan, Dependency audit, SAST (CodeQL), E2E tests.</p></div></div>"
-          jq -n \
+          # Sanitize commit message — strip newlines to avoid breaking HTML
+          SAFE_MSG=$(echo "$GH_MSG" | head -1)
+          HTML="<div style='font-family:sans-serif;max-width:600px'><div style='background:#16a34a;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0'><h2 style='margin:0'>CI Pipeline Passed</h2></div><div style='padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px'><table style='width:100%;border-collapse:collapse'><tr><td style='padding:8px 0;color:#6b7280;width:140px'>Branch</td><td style='padding:8px 0;font-weight:600'>${GH_BRANCH}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Commit</td><td style='padding:8px 0;font-family:monospace'>${SHORT_SHA}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Author</td><td style='padding:8px 0'>${GH_ACTOR}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Message</td><td style='padding:8px 0'>${SAFE_MSG}</td></tr></table><div style='margin-top:20px'><a href='${GH_RUN_URL}' style='background:#2563eb;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block'>View Run</a></div><p style='color:#6b7280;font-size:13px;margin-top:20px'>All 4 checks passed: Secrets scan, Dependency audit, SAST (CodeQL), E2E tests.</p></div></div>"
+          RESPONSE=$(jq -n \
             --arg from    "SPT Admin <$SMTP_FROM_EMAIL>" \
             --arg to      "$SUPER_ADMIN_EMAIL" \
             --arg subject "CI Passed - $GH_BRANCH ($SHORT_SHA)" \
             --arg html    "$HTML" \
           '{from:$from,to:[$to],subject:$subject,html:$html}' \
-          | curl -sf -X POST https://api.resend.com/emails \
+          | curl -s --fail-with-body -X POST https://api.resend.com/emails \
               -H "Authorization: Bearer $SMTP_PASS" \
               -H "Content-Type: application/json" \
-              -d @-
+              -d @-)
+          echo "$RESPONSE"
 
   # ──────────────────────────────────────────────────────────────────
   # NOTIFY ON FAILURE
@@ -194,6 +198,7 @@ jobs:
     if: failure()
     steps:
       - name: Send failure alert email
+        continue-on-error: true
         env:
           GH_SHA:            ${{ github.sha }}
           GH_BRANCH:         ${{ github.ref_name }}
@@ -214,14 +219,16 @@ jobs:
           [ "$RESULT_SAST"    = "failure" ] && FAILED="${FAILED}- SAST analysis (CodeQL)<br>"
           [ "$RESULT_E2E"     = "failure" ] && FAILED="${FAILED}- E2E test suite<br>"
           SHORT_SHA="${GH_SHA:0:7}"
-          HTML="<div style='font-family:sans-serif;max-width:600px'><div style='background:#dc2626;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0'><h2 style='margin:0'>CI Pipeline Failed</h2><p style='margin:8px 0 0;opacity:0.9'>Deploy is blocked</p></div><div style='padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px'><table style='width:100%;border-collapse:collapse'><tr><td style='padding:8px 0;color:#6b7280;width:140px'>Branch</td><td style='padding:8px 0;font-weight:600'>${GH_BRANCH}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Commit</td><td style='padding:8px 0;font-family:monospace'>${SHORT_SHA}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Author</td><td style='padding:8px 0'>${GH_ACTOR}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Message</td><td style='padding:8px 0'>${GH_MSG}</td></tr><tr><td style='padding:8px 0;color:#6b7280;vertical-align:top'>Failed</td><td style='padding:8px 0;color:#dc2626;font-weight:600'>${FAILED}</td></tr></table><div style='margin-top:20px'><a href='${GH_RUN_URL}' style='background:#dc2626;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block'>View Failure Logs</a></div></div></div>"
-          jq -n \
+          SAFE_MSG=$(echo "$GH_MSG" | head -1)
+          HTML="<div style='font-family:sans-serif;max-width:600px'><div style='background:#dc2626;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0'><h2 style='margin:0'>CI Pipeline Failed</h2><p style='margin:8px 0 0;opacity:0.9'>Deploy is blocked</p></div><div style='padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px'><table style='width:100%;border-collapse:collapse'><tr><td style='padding:8px 0;color:#6b7280;width:140px'>Branch</td><td style='padding:8px 0;font-weight:600'>${GH_BRANCH}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Commit</td><td style='padding:8px 0;font-family:monospace'>${SHORT_SHA}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Author</td><td style='padding:8px 0'>${GH_ACTOR}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Message</td><td style='padding:8px 0'>${SAFE_MSG}</td></tr><tr><td style='padding:8px 0;color:#6b7280;vertical-align:top'>Failed</td><td style='padding:8px 0;color:#dc2626;font-weight:600'>${FAILED}</td></tr></table><div style='margin-top:20px'><a href='${GH_RUN_URL}' style='background:#dc2626;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block'>View Failure Logs</a></div></div></div>"
+          RESPONSE=$(jq -n \
             --arg from    "SPT Admin <$SMTP_FROM_EMAIL>" \
             --arg to      "$SUPER_ADMIN_EMAIL" \
             --arg subject "CI FAILED - $GH_BRANCH - Action Required" \
             --arg html    "$HTML" \
           '{from:$from,to:[$to],subject:$subject,html:$html}' \
-          | curl -sf -X POST https://api.resend.com/emails \
+          | curl -s --fail-with-body -X POST https://api.resend.com/emails \
               -H "Authorization: Bearer $SMTP_PASS" \
               -H "Content-Type: application/json" \
-              -d @-
+              -d @-)
+          echo "$RESPONSE"
