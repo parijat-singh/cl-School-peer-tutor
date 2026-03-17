@@ -189,17 +189,34 @@ export function Layout() {
 
       {/* Footer */}
       <footer className="bg-white border-t border-gray-200 mt-auto">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <p className="text-xs text-gray-400">
-            © {new Date().getFullYear()} PeerTutor. All rights reserved.
-          </p>
-          <div className="flex items-center gap-4 text-xs text-gray-500">
-            <NavLink to="/contact" className="hover:text-brand-500 transition-colors">
-              Contact Us
-            </NavLink>
-            <a href="mailto:admin@schoolpeertutor.com" className="hover:text-brand-500 transition-colors">
-              admin@schoolpeertutor.com
-            </a>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col gap-3">
+          {/* Links row */}
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="flex items-center gap-1.5">
+              <div className="w-5 h-5 rounded bg-brand-500 flex items-center justify-center">
+                <BookOpen className="w-3 h-3 text-white" />
+              </div>
+              <span className="text-sm font-display font-semibold text-gray-700">PeerTutor</span>
+            </div>
+            <div className="flex items-center gap-4 text-xs text-gray-500">
+              <NavLink to="/contact" className="hover:text-brand-500 transition-colors">
+                Contact Us
+              </NavLink>
+              <a href="mailto:admin@schoolpeertutor.com" className="hover:text-brand-500 transition-colors">
+                admin@schoolpeertutor.com
+              </a>
+            </div>
+          </div>
+
+          {/* Copyright row */}
+          <div className="border-t border-gray-100 pt-3 flex flex-col sm:flex-row items-center justify-between gap-2">
+            <p className="text-xs text-gray-400">
+              &copy; {new Date().getFullYear()} PeerTutor. All rights reserved.
+            </p>
+            <p className="text-xs text-gray-400 text-center sm:text-right max-w-md">
+              The design, concept, branding, and software of this platform are protected by copyright.
+              Unauthorized reproduction, distribution, or imitation is strictly prohibited.
+            </p>
           </div>
         </div>
       </footer>
