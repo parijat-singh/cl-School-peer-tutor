@@ -154,6 +154,27 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // ── Booking Requests collection ──────────────────────────────
+    // /bookingRequests/{requestId}
+    // Tutee creates requests; tutor accepts/rejects; both can read their own.
+
+    match /bookingRequests/{requestId} {
+      // Tutee or tutor on the request can read it
+      allow read: if isSignedIn() &&
+        (resource.data.tuteeId == uid() || resource.data.tutorId == uid());
+
+      // Only the tutee can create a request for themselves
+      allow create: if isSignedIn() &&
+        request.resource.data.tuteeId == uid() &&
+        sameDomain(request.resource.data.schoolDomain);
+
+      // Tutor can update (accept/reject); tutee can cancel their own pending request
+      allow update: if isSignedIn() &&
+        (resource.data.tutorId == uid() || resource.data.tuteeId == uid());
+
+      allow delete: if false;
+    }
+
     // ── Default deny everything else ────────────────────────────
     match /{document=**} {
       allow read, write: if false;

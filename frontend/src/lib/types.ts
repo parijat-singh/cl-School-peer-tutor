@@ -135,6 +135,32 @@ export interface AdminAuditLog {
   timestamp: Timestamp;
 }
 
+export type BookingRequestStatus = "pending" | "accepted" | "rejected" | "cancelled";
+
+export interface BookingRequest {
+  id: string;
+  tutorId: string;
+  tuteeId: string;
+  tuteeName: string;
+  tutorName: string;
+  tuteeEmail: string;
+  tutorEmail: string;
+  slotId: string;
+  subject: string;
+  scheduledDate: string;      // "YYYY-MM-DD"
+  day: DayOfWeek;
+  startTime: string;
+  endTime: string;
+  duration: SessionDuration;
+  recurring: boolean;
+  status: BookingRequestStatus;
+  schoolDomain: string;
+  createdAt: Timestamp;
+  respondedAt?: Timestamp;
+  sessionId?: string;         // set when accepted
+  rejectionReason?: string;   // "slot_taken" | custom message
+}
+
 // ── API Request/Response types ───────────────────────────────────
 
 export interface BookSessionRequest {

@@ -3,6 +3,9 @@
 
 export { onUserCreate }         from "./auth/onUserCreate";
 export { bookSession }          from "./bookings/bookSession";
+export { requestBooking }       from "./bookings/requestBooking";
+export { cancelBookingRequest } from "./bookings/cancelBookingRequest";
+export { respondToBooking }     from "./bookings/respondToBooking";
 export { cancelSession }        from "./sessions/cancelSession";
 export { submitRating }         from "./reviews/submitRating";
 export { adminDeleteReview }    from "./reviews/adminDeleteReview";

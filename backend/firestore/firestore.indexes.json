@@ -61,6 +61,32 @@
         { "fieldPath": "booked",       "order": "ASCENDING" },
         { "fieldPath": "day",          "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "bookingRequests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "tutorId",   "order": "ASCENDING" },
+        { "fieldPath": "status",    "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "bookingRequests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "tuteeId",   "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "bookingRequests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "slotId",        "order": "ASCENDING" },
+        { "fieldPath": "scheduledDate", "order": "ASCENDING" },
+        { "fieldPath": "status",        "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []
