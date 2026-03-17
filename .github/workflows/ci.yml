@@ -1,7 +1,7 @@
 name: CI
 
 # Runs on every push and pull request to master.
-# No production secrets are used here — deployment is done locally via scripts/deploy.sh.
+# No production secrets are used here - deployment is done locally via scripts/deploy.sh.
 
 on:
   push:
@@ -19,7 +19,7 @@ permissions:
 
 jobs:
   # ──────────────────────────────────────────────────────────────────
-  # JOB 1: Secret scan — detect accidentally committed credentials
+  # JOB 1: Secret scan - detect accidentally committed credentials
   # ──────────────────────────────────────────────────────────────────
   secret-scan:
     name: "Scan: Secrets (Gitleaks)"
@@ -35,7 +35,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ──────────────────────────────────────────────────────────────────
-  # JOB 2: Dependency audit — known CVEs in npm packages
+  # JOB 2: Dependency audit - known CVEs in npm packages
   # ──────────────────────────────────────────────────────────────────
   dependency-scan:
     name: "Scan: Dependencies (npm audit)"
@@ -62,7 +62,7 @@ jobs:
           npm audit --audit-level=high
 
   # ──────────────────────────────────────────────────────────────────
-  # JOB 3: SAST — static analysis for security vulnerabilities in code
+  # JOB 3: SAST - static analysis for security vulnerabilities in code
   # ──────────────────────────────────────────────────────────────────
   sast-scan:
     name: "Scan: SAST (CodeQL)"
@@ -86,7 +86,7 @@ jobs:
           category: "/language:typescript"
 
   # ──────────────────────────────────────────────────────────────────
-  # JOB 4: E2E tests — full flow tests against Firebase emulators
+  # JOB 4: E2E tests - full flow tests against Firebase emulators
   # Runs after secret-scan passes so we never run tests on a commit
   # that contains leaked credentials.
   # ──────────────────────────────────────────────────────────────────
@@ -165,7 +165,7 @@ jobs:
         shell: powershell
     steps:
       - name: All checks passed
-        run: Write-Host "All checks passed — safe to deploy"
+        run: Write-Host "All checks passed - safe to deploy"
 
       - name: Load .env.production
         run: |
@@ -190,7 +190,7 @@ jobs:
           $body = @{
             from    = "SPT Admin <$env:SMTP_FROM_EMAIL>"
             to      = @($env:SUPER_ADMIN_EMAIL)
-            subject = "✅ CI Passed — ${{ github.ref_name }} ($shortSha)"
+            subject = "✅ CI Passed - ${{ github.ref_name }} ($shortSha)"
             html    = "<div style='font-family:sans-serif;max-width:600px'><div style='background:#16a34a;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0'><h2 style='margin:0'>✅ CI Pipeline Passed</h2></div><div style='padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px'><table style='width:100%;border-collapse:collapse'><tr><td style='padding:8px 0;color:#6b7280;width:140px'>Branch</td><td style='padding:8px 0;font-weight:600'>${{ github.ref_name }}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Commit</td><td style='padding:8px 0;font-family:monospace'>$shortSha</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Author</td><td style='padding:8px 0'>${{ github.actor }}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Message</td><td style='padding:8px 0'>${{ github.event.head_commit.message }}</td></tr></table><div style='margin-top:20px'><a href='${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}' style='background:#2563eb;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block'>View Run →</a></div><p style='color:#6b7280;font-size:13px;margin-top:20px'>All 4 checks passed: Secrets scan, Dependency audit, SAST (CodeQL), E2E tests.</p></div></div>"
           } | ConvertTo-Json
           Invoke-RestMethod -Uri "https://api.resend.com/emails" `
@@ -199,7 +199,7 @@ jobs:
             -Body $body
 
   # ──────────────────────────────────────────────────────────────────
-  # NOTIFY ON FAILURE — runs on your machine so it can read
+  # NOTIFY ON FAILURE - runs on your machine so it can read
   # .env.production for email credentials without storing in GitHub.
   # ──────────────────────────────────────────────────────────────────
   notify-failure:
@@ -239,8 +239,8 @@ jobs:
           $body = @{
             from    = "SPT Admin <$env:SMTP_FROM_EMAIL>"
             to      = @($env:SUPER_ADMIN_EMAIL)
-            subject = "🚨 CI FAILED — ${{ github.ref_name }} — Action Required"
-            html    = "<div style='font-family:sans-serif;max-width:600px'><div style='background:#dc2626;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0'><h2 style='margin:0'>🚨 CI Pipeline Failed</h2><p style='margin:8px 0 0;opacity:0.9'>Immediate action required — deploy is blocked</p></div><div style='padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px'><table style='width:100%;border-collapse:collapse'><tr><td style='padding:8px 0;color:#6b7280;width:140px'>Branch</td><td style='padding:8px 0;font-weight:600'>${{ github.ref_name }}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Commit</td><td style='padding:8px 0;font-family:monospace'>$shortSha</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Author</td><td style='padding:8px 0'>${{ github.actor }}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Message</td><td style='padding:8px 0'>${{ github.event.head_commit.message }}</td></tr><tr><td style='padding:8px 0;color:#6b7280;vertical-align:top'>Failed checks</td><td style='padding:8px 0;color:#dc2626;font-weight:600'>$failedHtml</td></tr></table><div style='margin-top:20px'><a href='${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}' style='background:#dc2626;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block'>View Failure Logs →</a></div></div></div>"
+            subject = "🚨 CI FAILED - ${{ github.ref_name }} - Action Required"
+            html    = "<div style='font-family:sans-serif;max-width:600px'><div style='background:#dc2626;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0'><h2 style='margin:0'>🚨 CI Pipeline Failed</h2><p style='margin:8px 0 0;opacity:0.9'>Immediate action required - deploy is blocked</p></div><div style='padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px'><table style='width:100%;border-collapse:collapse'><tr><td style='padding:8px 0;color:#6b7280;width:140px'>Branch</td><td style='padding:8px 0;font-weight:600'>${{ github.ref_name }}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Commit</td><td style='padding:8px 0;font-family:monospace'>$shortSha</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Author</td><td style='padding:8px 0'>${{ github.actor }}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Message</td><td style='padding:8px 0'>${{ github.event.head_commit.message }}</td></tr><tr><td style='padding:8px 0;color:#6b7280;vertical-align:top'>Failed checks</td><td style='padding:8px 0;color:#dc2626;font-weight:600'>$failedHtml</td></tr></table><div style='margin-top:20px'><a href='${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}' style='background:#dc2626;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block'>View Failure Logs →</a></div></div></div>"
           } | ConvertTo-Json
           Invoke-RestMethod -Uri "https://api.resend.com/emails" `
             -Method POST `

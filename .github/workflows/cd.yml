@@ -1,7 +1,7 @@
-name: CD — Deploy to Production
+name: CD - Deploy to Production
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Runs on YOUR machine (self-hosted runner) — no secrets stored in GitHub.
+# Runs on YOUR machine (self-hosted runner) - no secrets stored in GitHub.
 # All credentials are read from .env.production on your local filesystem.
 #
 # Triggers automatically after the CI workflow passes on master.
@@ -28,9 +28,9 @@ permissions:
 jobs:
   deploy:
     name: "Deploy: S3 + CloudFront + Firebase"
-    # !! Runs on your machine — not GitHub's servers !!
+    # !! Runs on your machine - not GitHub's servers !!
     runs-on: self-hosted
-    # Only deploy when CI passed — never deploy a broken build
+    # Only deploy when CI passed - never deploy a broken build
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     defaults:
       run:
@@ -134,7 +134,7 @@ jobs:
           $body = @{
             from    = "SPT Admin <$env:SMTP_FROM_EMAIL>"
             to      = @($env:SUPER_ADMIN_EMAIL)
-            subject = "🚀 Deployed to Production — $shortSha"
+            subject = "🚀 Deployed to Production - $shortSha"
             html    = "<div style='font-family:sans-serif;max-width:600px'><div style='background:#2563eb;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0'><h2 style='margin:0'>🚀 Production Deployment Successful</h2><p style='margin:8px 0 0;opacity:0.9'>schoolpeertutor.com is now live</p></div><div style='padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px'><table style='width:100%;border-collapse:collapse'><tr><td style='padding:8px 0;color:#6b7280;width:160px'>Commit</td><td style='padding:8px 0;font-family:monospace'>$shortSha</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Message</td><td style='padding:8px 0'>${{ github.event.workflow_run.display_title }}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>CloudFront ID</td><td style='padding:8px 0'>$cfId</td></tr></table><div style='margin-top:20px'><a href='https://schoolpeertutor.com' style='background:#2563eb;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block'>View Live Site →</a>&nbsp;&nbsp;<a href='${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}' style='background:#f3f4f6;color:#111;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block'>View Deploy Logs</a></div></div></div>"
           } | ConvertTo-Json
           Invoke-RestMethod -Uri "https://api.resend.com/emails" `
@@ -150,8 +150,8 @@ jobs:
           $body = @{
             from    = "SPT Admin <$env:SMTP_FROM_EMAIL>"
             to      = @($env:SUPER_ADMIN_EMAIL)
-            subject = "🔥 DEPLOY FAILED — Production deployment error"
-            html    = "<div style='font-family:sans-serif;max-width:600px'><div style='background:#dc2626;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0'><h2 style='margin:0'>🔥 Production Deployment Failed</h2><p style='margin:8px 0 0;opacity:0.9'>CI passed but deploy failed — site is unchanged</p></div><div style='padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px'><p>Commit: $shortSha</p><p>Message: ${{ github.event.workflow_run.display_title }}</p><a href='${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}' style='background:#dc2626;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block'>View Failure Logs →</a></div></div>"
+            subject = "🔥 DEPLOY FAILED - Production deployment error"
+            html    = "<div style='font-family:sans-serif;max-width:600px'><div style='background:#dc2626;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0'><h2 style='margin:0'>🔥 Production Deployment Failed</h2><p style='margin:8px 0 0;opacity:0.9'>CI passed but deploy failed - site is unchanged</p></div><div style='padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px'><p>Commit: $shortSha</p><p>Message: ${{ github.event.workflow_run.display_title }}</p><a href='${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}' style='background:#dc2626;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block'>View Failure Logs →</a></div></div>"
           } | ConvertTo-Json
           Invoke-RestMethod -Uri "https://api.resend.com/emails" `
             -Method POST `
