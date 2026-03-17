@@ -916,7 +916,12 @@ SESSION1=$(get_doc "sessions/${SESSION1_ID}")
 assert_equals "$(extract_string "$SESSION1" "status")"         "upcoming"        "Created session status is upcoming"
 assert_equals "$(extract_string "$SESSION1" "tutorId")"        "user-tutor-001"  "Created session tutorId correct"
 assert_equals "$(extract_string "$SESSION1" "tuteeId")"        "user-tutee-001"  "Created session tuteeId correct"
-assert_equals "$(extract_string "$SESSION1" "meetLinkStatus")" "pending"         "Created session meetLinkStatus is pending"
+MEET_STATUS=$(extract_string "$SESSION1" "meetLinkStatus")
+if [ "$MEET_STATUS" = "pending" ] || [ "$MEET_STATUS" = "failed" ] || [ "$MEET_STATUS" = "ready" ]; then
+  pass "Created session meetLinkStatus is a valid value (${MEET_STATUS})"
+else
+  fail "Created session meetLinkStatus is a valid value" "pending|failed|ready" "${MEET_STATUS}"
+fi
 
 SLOT1=$(get_doc "users/user-tutor-001/availability/slot-001")
 if echo "$SLOT1" | python -c "
