@@ -117,9 +117,18 @@ jobs:
         working-directory: backend/functions
         run: npm run build
 
+      - name: Verify functions build output
+        run: |
+          if (-not (Test-Path "backend/functions/lib/index.js")) {
+            Write-Error "Functions build output not found at backend/functions/lib/index.js"
+            exit 1
+          }
+          Write-Host "Functions build output verified"
+
       - name: Deploy to Firebase
         working-directory: backend
         run: |
+          $env:FUNCTIONS_DISCOVERY_TIMEOUT = "120"
           firebase deploy `
             --only "functions,firestore:rules,storage" `
             --project $env:FIREBASE_PROJECT_ID `
