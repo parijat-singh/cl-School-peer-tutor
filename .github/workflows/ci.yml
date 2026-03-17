@@ -162,43 +162,41 @@ jobs:
     needs: [secret-scan, dependency-scan, sast-scan, e2e-tests]
     defaults:
       run:
-        shell: bash
+        shell: pwsh
     steps:
       - name: All checks passed
-        run: echo "All checks passed — safe to deploy"
+        run: Write-Host "All checks passed — safe to deploy"
 
       - name: Load .env.production
         run: |
-          # Resolve .env.production from the runner's known machine path
-          for CANDIDATE in \
-            "$HOME/OneDrive/Documents/Coding/cl-School-peer-tutor/.env.production" \
-            "C:/Users/user/OneDrive/Documents/Coding/cl-School-peer-tutor/.env.production" \
-            "$SECRETS_FILE"; do
-            if [ -f "$CANDIDATE" ]; then
-              set -a; source "$CANDIDATE"; set +a
-              while IFS= read -r line || [ -n "$line" ]; do
-                [[ "$line" =~ ^#.*$ ]] && continue
-                [[ -z "$line" ]]       && continue
-                echo "$line" >> "$GITHUB_ENV"
-              done < "$CANDIDATE"
-              echo "Loaded secrets from $CANDIDATE"
-              break
-            fi
-          done
+          $candidates = @(
+            "$env:USERPROFILE\OneDrive\Documents\Coding\cl-School-peer-tutor\.env.production",
+            "C:\Users\user\OneDrive\Documents\Coding\cl-School-peer-tutor\.env.production"
+          )
+          $envFile = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $envFile) {
+            Write-Error "ERROR: .env.production not found. Checked: $($candidates -join ', ')"
+            exit 1
+          }
+          Get-Content $envFile | ForEach-Object {
+            if ($_ -match '^\s*#' -or [string]::IsNullOrWhiteSpace($_)) { return }
+            Add-Content -Path $env:GITHUB_ENV -Value $_
+          }
+          Write-Host "✅ Loaded secrets from $envFile"
 
       - name: Notify success
         run: |
-          SHORT_SHA="${{ github.sha }}"
-          SHORT_SHA="${SHORT_SHA:0:7}"
-          curl -s -X POST https://api.resend.com/emails \
-            -H "Authorization: Bearer $SMTP_PASS" \
-            -H "Content-Type: application/json" \
-            -d "{
-              \"from\": \"SPT Admin <$SMTP_FROM_EMAIL>\",
-              \"to\": [\"$SUPER_ADMIN_EMAIL\"],
-              \"subject\": \"✅ CI Passed — ${{ github.ref_name }} (${SHORT_SHA})\",
-              \"html\": \"<div style='font-family:sans-serif;max-width:600px'><div style='background:#16a34a;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0'><h2 style='margin:0'>✅ CI Pipeline Passed</h2></div><div style='padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px'><table style='width:100%;border-collapse:collapse'><tr><td style='padding:8px 0;color:#6b7280;width:140px'>Branch</td><td style='padding:8px 0;font-weight:600'>${{ github.ref_name }}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Commit</td><td style='padding:8px 0;font-family:monospace'>${SHORT_SHA}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Author</td><td style='padding:8px 0'>${{ github.actor }}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Message</td><td style='padding:8px 0'>${{ github.event.head_commit.message }}</td></tr></table><div style='margin-top:20px'><a href='${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}' style='background:#2563eb;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block'>View Run →</a></div><p style='color:#6b7280;font-size:13px;margin-top:20px'>All 4 checks passed: Secrets scan, Dependency audit, SAST (CodeQL), E2E tests.</p></div></div>\"
-            }"
+          $shortSha = "${{ github.sha }}".Substring(0, 7)
+          $body = @{
+            from    = "SPT Admin <$env:SMTP_FROM_EMAIL>"
+            to      = @($env:SUPER_ADMIN_EMAIL)
+            subject = "✅ CI Passed — ${{ github.ref_name }} ($shortSha)"
+            html    = "<div style='font-family:sans-serif;max-width:600px'><div style='background:#16a34a;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0'><h2 style='margin:0'>✅ CI Pipeline Passed</h2></div><div style='padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px'><table style='width:100%;border-collapse:collapse'><tr><td style='padding:8px 0;color:#6b7280;width:140px'>Branch</td><td style='padding:8px 0;font-weight:600'>${{ github.ref_name }}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Commit</td><td style='padding:8px 0;font-family:monospace'>$shortSha</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Author</td><td style='padding:8px 0'>${{ github.actor }}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Message</td><td style='padding:8px 0'>${{ github.event.head_commit.message }}</td></tr></table><div style='margin-top:20px'><a href='${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}' style='background:#2563eb;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block'>View Run →</a></div><p style='color:#6b7280;font-size:13px;margin-top:20px'>All 4 checks passed: Secrets scan, Dependency audit, SAST (CodeQL), E2E tests.</p></div></div>"
+          } | ConvertTo-Json
+          Invoke-RestMethod -Uri "https://api.resend.com/emails" `
+            -Method POST `
+            -Headers @{ Authorization = "Bearer $env:SMTP_PASS"; "Content-Type" = "application/json" } `
+            -Body $body
 
   # ──────────────────────────────────────────────────────────────────
   # NOTIFY ON FAILURE — runs on your machine so it can read
@@ -211,40 +209,40 @@ jobs:
     if: failure()
     defaults:
       run:
-        shell: bash
+        shell: pwsh
     steps:
       - name: Load .env.production
         run: |
-          for CANDIDATE in \
-            "$HOME/OneDrive/Documents/Coding/cl-School-peer-tutor/.env.production" \
-            "C:/Users/user/OneDrive/Documents/Coding/cl-School-peer-tutor/.env.production" \
-            "$SECRETS_FILE"; do
-            if [ -f "$CANDIDATE" ]; then
-              set -a; source "$CANDIDATE"; set +a
-              while IFS= read -r line || [ -n "$line" ]; do
-                [[ "$line" =~ ^#.*$ ]] && continue
-                [[ -z "$line" ]]       && continue
-                echo "$line" >> "$GITHUB_ENV"
-              done < "$CANDIDATE"
-              break
-            fi
-          done
+          $candidates = @(
+            "$env:USERPROFILE\OneDrive\Documents\Coding\cl-School-peer-tutor\.env.production",
+            "C:\Users\user\OneDrive\Documents\Coding\cl-School-peer-tutor\.env.production"
+          )
+          $envFile = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $envFile) {
+            Write-Error "ERROR: .env.production not found."
+            exit 1
+          }
+          Get-Content $envFile | ForEach-Object {
+            if ($_ -match '^\s*#' -or [string]::IsNullOrWhiteSpace($_)) { return }
+            Add-Content -Path $env:GITHUB_ENV -Value $_
+          }
 
       - name: Send failure alert email
         run: |
-          FAILED=""
-          [ "${{ needs.secret-scan.result }}"     = "failure" ] && FAILED="$FAILED• Secrets scan (Gitleaks)<br>"
-          [ "${{ needs.dependency-scan.result }}" = "failure" ] && FAILED="$FAILED• Dependency audit (npm audit)<br>"
-          [ "${{ needs.sast-scan.result }}"       = "failure" ] && FAILED="$FAILED• SAST analysis (CodeQL)<br>"
-          [ "${{ needs.e2e-tests.result }}"       = "failure" ] && FAILED="$FAILED• E2E test suite<br>"
-          SHORT_SHA="${{ github.sha }}"
-          SHORT_SHA="${SHORT_SHA:0:7}"
-          curl -s -X POST https://api.resend.com/emails \
-            -H "Authorization: Bearer $SMTP_PASS" \
-            -H "Content-Type: application/json" \
-            -d "{
-              \"from\": \"SPT Admin <$SMTP_FROM_EMAIL>\",
-              \"to\": [\"$SUPER_ADMIN_EMAIL\"],
-              \"subject\": \"🚨 CI FAILED — ${{ github.ref_name }} — Action Required\",
-              \"html\": \"<div style='font-family:sans-serif;max-width:600px'><div style='background:#dc2626;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0'><h2 style='margin:0'>🚨 CI Pipeline Failed</h2><p style='margin:8px 0 0;opacity:0.9'>Immediate action required — deploy is blocked</p></div><div style='padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px'><table style='width:100%;border-collapse:collapse'><tr><td style='padding:8px 0;color:#6b7280;width:140px'>Branch</td><td style='padding:8px 0;font-weight:600'>${{ github.ref_name }}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Commit</td><td style='padding:8px 0;font-family:monospace'>${SHORT_SHA}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Author</td><td style='padding:8px 0'>${{ github.actor }}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Message</td><td style='padding:8px 0'>${{ github.event.head_commit.message }}</td></tr><tr><td style='padding:8px 0;color:#6b7280;vertical-align:top'>Failed</td><td style='padding:8px 0;color:#dc2626;font-weight:600'>${FAILED}</td></tr></table><div style='margin-top:20px'><a href='${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}' style='background:#dc2626;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block'>View Failure Logs →</a></div></div></div>\"
-            }"
+          $failed = @()
+          if ("${{ needs.secret-scan.result }}"     -eq "failure") { $failed += "• Secrets scan (Gitleaks)" }
+          if ("${{ needs.dependency-scan.result }}" -eq "failure") { $failed += "• Dependency audit (npm audit)" }
+          if ("${{ needs.sast-scan.result }}"       -eq "failure") { $failed += "• SAST analysis (CodeQL)" }
+          if ("${{ needs.e2e-tests.result }}"       -eq "failure") { $failed += "• E2E test suite" }
+          $failedHtml = ($failed | ForEach-Object { "$_<br>" }) -join ""
+          $shortSha   = "${{ github.sha }}".Substring(0, 7)
+          $body = @{
+            from    = "SPT Admin <$env:SMTP_FROM_EMAIL>"
+            to      = @($env:SUPER_ADMIN_EMAIL)
+            subject = "🚨 CI FAILED — ${{ github.ref_name }} — Action Required"
+            html    = "<div style='font-family:sans-serif;max-width:600px'><div style='background:#dc2626;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0'><h2 style='margin:0'>🚨 CI Pipeline Failed</h2><p style='margin:8px 0 0;opacity:0.9'>Immediate action required — deploy is blocked</p></div><div style='padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px'><table style='width:100%;border-collapse:collapse'><tr><td style='padding:8px 0;color:#6b7280;width:140px'>Branch</td><td style='padding:8px 0;font-weight:600'>${{ github.ref_name }}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Commit</td><td style='padding:8px 0;font-family:monospace'>$shortSha</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Author</td><td style='padding:8px 0'>${{ github.actor }}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Message</td><td style='padding:8px 0'>${{ github.event.head_commit.message }}</td></tr><tr><td style='padding:8px 0;color:#6b7280;vertical-align:top'>Failed checks</td><td style='padding:8px 0;color:#dc2626;font-weight:600'>$failedHtml</td></tr></table><div style='margin-top:20px'><a href='${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}' style='background:#dc2626;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block'>View Failure Logs →</a></div></div></div>"
+          } | ConvertTo-Json
+          Invoke-RestMethod -Uri "https://api.resend.com/emails" `
+            -Method POST `
+            -Headers @{ Authorization = "Bearer $env:SMTP_PASS"; "Content-Type" = "application/json" } `
+            -Body $body

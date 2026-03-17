@@ -34,7 +34,7 @@ jobs:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     defaults:
       run:
-        shell: bash
+        shell: pwsh
 
     steps:
       # ── Checkout the exact commit that passed CI ───────────────────────────
@@ -46,114 +46,114 @@ jobs:
       # This file lives only on your machine and is never committed to git.
       - name: Load .env.production
         run: |
-          ENV_FILE="${{ github.workspace }}/../../../.env.production"
-          if [ ! -f "$ENV_FILE" ]; then
-            echo "ERROR: .env.production not found at $ENV_FILE"
+          $candidates = @(
+            "$env:USERPROFILE\OneDrive\Documents\Coding\cl-School-peer-tutor\.env.production",
+            "C:\Users\user\OneDrive\Documents\Coding\cl-School-peer-tutor\.env.production"
+          )
+          $envFile = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $envFile) {
+            Write-Error "ERROR: .env.production not found. Checked: $($candidates -join ', ')"
             exit 1
-          fi
-          # Export all vars into the GitHub Actions environment
-          set -a
-          source "$ENV_FILE"
-          set +a
-          # Forward each var to GITHUB_ENV so subsequent steps can use them
-          while IFS= read -r line || [ -n "$line" ]; do
-            # Skip comments and empty lines
-            [[ "$line" =~ ^#.*$ ]] && continue
-            [[ -z "$line" ]]       && continue
-            echo "$line" >> "$GITHUB_ENV"
-          done < "$ENV_FILE"
-          echo "✅ .env.production loaded"
+          }
+          Get-Content $envFile | ForEach-Object {
+            if ($_ -match '^\s*#' -or [string]::IsNullOrWhiteSpace($_)) { return }
+            Add-Content -Path $env:GITHUB_ENV -Value $_
+          }
+          Write-Host "✅ .env.production loaded from $envFile"
 
       # ── Build frontend ─────────────────────────────────────────────────────
       - name: Install frontend dependencies
-        run: npm ci --prefer-offline
         working-directory: frontend
+        run: npm ci --prefer-offline
 
       - name: Build frontend
         working-directory: frontend
         run: |
-          VITE_FIREBASE_API_KEY="$FIREBASE_API_KEY" \
-          VITE_FIREBASE_AUTH_DOMAIN="$FIREBASE_AUTH_DOMAIN" \
-          VITE_FIREBASE_PROJECT_ID="$FIREBASE_PROJECT_ID" \
-          VITE_FIREBASE_STORAGE_BUCKET="$FIREBASE_STORAGE_BUCKET" \
-          VITE_FIREBASE_MESSAGING_SENDER_ID="$FIREBASE_MESSAGING_SENDER_ID" \
-          VITE_FIREBASE_APP_ID="$FIREBASE_APP_ID" \
-          VITE_USE_EMULATORS="false" \
+          $env:VITE_FIREBASE_API_KEY             = $env:FIREBASE_API_KEY
+          $env:VITE_FIREBASE_AUTH_DOMAIN         = $env:FIREBASE_AUTH_DOMAIN
+          $env:VITE_FIREBASE_PROJECT_ID          = $env:FIREBASE_PROJECT_ID
+          $env:VITE_FIREBASE_STORAGE_BUCKET      = $env:FIREBASE_STORAGE_BUCKET
+          $env:VITE_FIREBASE_MESSAGING_SENDER_ID = $env:FIREBASE_MESSAGING_SENDER_ID
+          $env:VITE_FIREBASE_APP_ID              = $env:FIREBASE_APP_ID
+          $env:VITE_USE_EMULATORS                = "false"
           npm run build
 
       # ── Deploy to S3 ──────────────────────────────────────────────────────
       - name: Sync hashed assets to S3 (long-lived cache)
         run: |
-          aws s3 sync frontend/dist/ "s3://$S3_BUCKET/" \
-            --profile "$AWS_PROFILE" \
-            --delete \
-            --cache-control "max-age=31536000,immutable" \
-            --exclude "index.html" \
+          aws s3 sync frontend/dist/ "s3://$env:S3_BUCKET/" `
+            --profile $env:AWS_PROFILE `
+            --delete `
+            --cache-control "max-age=31536000,immutable" `
+            --exclude "index.html" `
             --exclude "*.map"
 
       - name: Upload index.html (no-cache)
         run: |
-          aws s3 cp frontend/dist/index.html "s3://$S3_BUCKET/index.html" \
-            --profile "$AWS_PROFILE" \
-            --cache-control "no-cache,no-store,must-revalidate" \
+          aws s3 cp frontend/dist/index.html "s3://$env:S3_BUCKET/index.html" `
+            --profile $env:AWS_PROFILE `
+            --cache-control "no-cache,no-store,must-revalidate" `
             --content-type "text/html"
 
       # ── Invalidate CloudFront ─────────────────────────────────────────────
       - name: Invalidate CloudFront cache
         id: invalidate
         run: |
-          ID=$(aws cloudfront create-invalidation \
-            --profile "$AWS_PROFILE" \
-            --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" \
-            --paths "/*" \
-            --query 'Invalidation.Id' \
-            --output text)
-          echo "invalidation_id=$ID" >> "$GITHUB_OUTPUT"
-          echo "CloudFront invalidation: $ID"
+          $id = aws cloudfront create-invalidation `
+            --profile $env:AWS_PROFILE `
+            --distribution-id $env:CLOUDFRONT_DISTRIBUTION_ID `
+            --paths "/*" `
+            --query "Invalidation.Id" `
+            --output text
+          "invalidation_id=$id" | Add-Content -Path $env:GITHUB_OUTPUT
+          Write-Host "CloudFront invalidation: $id"
 
       # ── Deploy Firebase Functions + rules ────────────────────────────────
       - name: Install Cloud Functions dependencies
-        run: npm ci --prefer-offline
         working-directory: backend/functions
+        run: npm ci --prefer-offline
 
       - name: Build Cloud Functions
-        run: npm run build
         working-directory: backend/functions
+        run: npm run build
 
       - name: Deploy to Firebase
         working-directory: backend
         run: |
-          firebase deploy \
-            --only functions,firestore:rules,storage \
-            --project "$FIREBASE_PROJECT_ID" \
+          firebase deploy `
+            --only functions,firestore:rules,storage `
+            --project $env:FIREBASE_PROJECT_ID `
             --non-interactive
 
       # ── Notify success ────────────────────────────────────────────────────
       - name: Send deployment success email
         if: success()
         run: |
-          SHORT_SHA="${{ github.event.workflow_run.head_sha }}"
-          SHORT_SHA="${SHORT_SHA:0:7}"
-          curl -s -X POST https://api.resend.com/emails \
-            -H "Authorization: Bearer $SMTP_PASS" \
-            -H "Content-Type: application/json" \
-            -d "{
-              \"from\": \"SPT Admin <$SMTP_FROM_EMAIL>\",
-              \"to\": [\"$SUPER_ADMIN_EMAIL\"],
-              \"subject\": \"🚀 Deployed to Production — ${SHORT_SHA}\",
-              \"html\": \"<div style='font-family:sans-serif;max-width:600px'><div style='background:#2563eb;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0'><h2 style='margin:0'>🚀 Production Deployment Successful</h2><p style='margin:8px 0 0;opacity:0.9'>schoolpeertutor.com is now live</p></div><div style='padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px'><table style='width:100%;border-collapse:collapse'><tr><td style='padding:8px 0;color:#6b7280;width:160px'>Commit</td><td style='padding:8px 0;font-family:monospace'>${SHORT_SHA}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Message</td><td style='padding:8px 0'>${{ github.event.workflow_run.display_title }}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>CloudFront ID</td><td style='padding:8px 0'>${{ steps.invalidate.outputs.invalidation_id }}</td></tr></table><div style='margin-top:20px'><a href='https://schoolpeertutor.com' style='background:#2563eb;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block'>View Live Site →</a></div></div></div>\"
-            }"
+          $shortSha = "${{ github.event.workflow_run.head_sha }}".Substring(0, 7)
+          $cfId     = "${{ steps.invalidate.outputs.invalidation_id }}"
+          $body = @{
+            from    = "SPT Admin <$env:SMTP_FROM_EMAIL>"
+            to      = @($env:SUPER_ADMIN_EMAIL)
+            subject = "🚀 Deployed to Production — $shortSha"
+            html    = "<div style='font-family:sans-serif;max-width:600px'><div style='background:#2563eb;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0'><h2 style='margin:0'>🚀 Production Deployment Successful</h2><p style='margin:8px 0 0;opacity:0.9'>schoolpeertutor.com is now live</p></div><div style='padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px'><table style='width:100%;border-collapse:collapse'><tr><td style='padding:8px 0;color:#6b7280;width:160px'>Commit</td><td style='padding:8px 0;font-family:monospace'>$shortSha</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Message</td><td style='padding:8px 0'>${{ github.event.workflow_run.display_title }}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>CloudFront ID</td><td style='padding:8px 0'>$cfId</td></tr></table><div style='margin-top:20px'><a href='https://schoolpeertutor.com' style='background:#2563eb;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block'>View Live Site →</a>&nbsp;&nbsp;<a href='${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}' style='background:#f3f4f6;color:#111;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block'>View Deploy Logs</a></div></div></div>"
+          } | ConvertTo-Json
+          Invoke-RestMethod -Uri "https://api.resend.com/emails" `
+            -Method POST `
+            -Headers @{ Authorization = "Bearer $env:SMTP_PASS"; "Content-Type" = "application/json" } `
+            -Body $body
 
       # ── Notify failure ────────────────────────────────────────────────────
       - name: Send deployment failure email
         if: failure()
         run: |
-          curl -s -X POST https://api.resend.com/emails \
-            -H "Authorization: Bearer $SMTP_PASS" \
-            -H "Content-Type: application/json" \
-            -d "{
-              \"from\": \"SPT Admin <$SMTP_FROM_EMAIL>\",
-              \"to\": [\"$SUPER_ADMIN_EMAIL\"],
-              \"subject\": \"🔥 DEPLOY FAILED — Production deployment error\",
-              \"html\": \"<div style='font-family:sans-serif;max-width:600px'><div style='background:#dc2626;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0'><h2 style='margin:0'>🔥 Production Deployment Failed</h2><p style='margin:8px 0 0;opacity:0.9'>CI passed but deploy failed — site is unchanged</p></div><div style='padding:24px;border:1px solid #e5e7eb;border-top:none'><p>Commit: ${{ github.event.workflow_run.head_sha }}</p><p>Message: ${{ github.event.workflow_run.display_title }}</p><a href='${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}' style='background:#dc2626;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block'>View Failure Logs →</a></div></div>\"
-            }"
+          $shortSha = "${{ github.event.workflow_run.head_sha }}".Substring(0, 7)
+          $body = @{
+            from    = "SPT Admin <$env:SMTP_FROM_EMAIL>"
+            to      = @($env:SUPER_ADMIN_EMAIL)
+            subject = "🔥 DEPLOY FAILED — Production deployment error"
+            html    = "<div style='font-family:sans-serif;max-width:600px'><div style='background:#dc2626;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0'><h2 style='margin:0'>🔥 Production Deployment Failed</h2><p style='margin:8px 0 0;opacity:0.9'>CI passed but deploy failed — site is unchanged</p></div><div style='padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px'><p>Commit: $shortSha</p><p>Message: ${{ github.event.workflow_run.display_title }}</p><a href='${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}' style='background:#dc2626;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block'>View Failure Logs →</a></div></div>"
+          } | ConvertTo-Json
+          Invoke-RestMethod -Uri "https://api.resend.com/emails" `
+            -Method POST `
+            -Headers @{ Authorization = "Bearer $env:SMTP_PASS"; "Content-Type" = "application/json" } `
+            -Body $body
