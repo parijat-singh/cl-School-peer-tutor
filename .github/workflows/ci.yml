@@ -162,7 +162,7 @@ jobs:
     needs: [secret-scan, dependency-scan, sast-scan, e2e-tests]
     defaults:
       run:
-        shell: pwsh
+        shell: powershell
     steps:
       - name: All checks passed
         run: Write-Host "All checks passed — safe to deploy"
@@ -209,7 +209,7 @@ jobs:
     if: failure()
     defaults:
       run:
-        shell: pwsh
+        shell: powershell
     steps:
       - name: Load .env.production
         run: |
