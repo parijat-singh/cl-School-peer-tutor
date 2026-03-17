@@ -26,7 +26,7 @@ NC='\033[0m' # No Color
 
 if command -v jq &>/dev/null; then
   extract_string() { echo "$1" | jq -r ".fields.$2.stringValue // empty" 2>/dev/null; }
-  extract_bool()   { echo "$1" | jq -r ".fields.$2.booleanValue // empty" 2>/dev/null; }
+  extract_bool()   { echo "$1" | jq -r "if (.fields.$2.booleanValue == null) then empty else (.fields.$2.booleanValue | tostring) end" 2>/dev/null; }
   extract_int()    { echo "$1" | jq -r ".fields.$2.integerValue // empty" 2>/dev/null; }
   extract_double() { echo "$1" | jq -r ".fields.$2.doubleValue // empty" 2>/dev/null; }
 else
