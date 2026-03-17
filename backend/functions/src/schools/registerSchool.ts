@@ -60,7 +60,7 @@ export const registerSchool = functions.onCall(
       });
       await t.sendMail({
         from:    `"${process.env.SMTP_FROM_NAME ?? "PeerTutor"}" <${process.env.SMTP_FROM_EMAIL ?? ""}>`,
-        to:      superAdmin,
+        to:      process.env.SUPER_ADMIN_EMAIL ?? "",
         subject: `New school registration: ${name} (${domain})`,
         text:    `School: ${name}\nDomain: ${domain}\nType: ${type}\nAdmin: ${adminEmail}\n\nApprove at: https://schoolpeertutor.com/admin/schools/${domain}`,
       });
