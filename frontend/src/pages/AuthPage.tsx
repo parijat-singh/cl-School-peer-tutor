@@ -4,7 +4,7 @@ import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useAuth, validateSchoolEmail } from "@/lib/auth-context";
+import { useAuth } from "@/lib/auth-context";
 import { Button, Input, Select } from "@/components/shared/ui";
 import { BookOpen, AlertCircle, CheckCircle, Mail } from "lucide-react";
 import type { GradeLevel, UserRole } from "@/lib/types";
@@ -18,8 +18,7 @@ const signInSchema = z.object({
 
 const signUpSchema = z.object({
   name:            z.string().min(2, "Name must be at least 2 characters"),
-  email:           z.string().email("Enter a valid email")
-                     .refine(validateSchoolEmail, "Must be a school email (.edu or .k12)"),
+  email:           z.string().email("Enter a valid email"),
   password:        z.string().min(8, "Password must be at least 8 characters")
                      .regex(/[A-Z]/, "Must contain an uppercase letter")
                      .regex(/[0-9]/, "Must contain a number"),
@@ -341,7 +340,7 @@ export default function AuthPage() {
                   <Input
                     label="School Email"
                     type="email"
-                    placeholder="you@school.edu"
+                    placeholder="you@yourschool.com"
                     error={resetForm.formState.errors.email?.message}
                     {...resetForm.register("email")}
                   />
@@ -398,7 +397,7 @@ export default function AuthPage() {
                   <Input
                     label="School Email"
                     type="email"
-                    placeholder="you@school.edu"
+                    placeholder="you@yourschool.com"
                     error={signInForm.formState.errors.email?.message}
                     {...signInForm.register("email")}
                   />
@@ -445,8 +444,8 @@ export default function AuthPage() {
                   <Input
                     label="School Email"
                     type="email"
-                    placeholder="you@school.edu"
-                    hint="Must be a .edu or .k12 address"
+                    placeholder="you@yourschool.com"
+                    hint="Use the email address associated with your school"
                     error={signUpForm.formState.errors.email?.message}
                     {...signUpForm.register("email")}
                   />

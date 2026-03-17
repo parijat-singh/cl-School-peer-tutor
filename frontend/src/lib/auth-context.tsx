@@ -34,13 +34,11 @@ interface SignUpParams {
   role: UserRole;
 }
 
-// Allowed school email domains pattern
-const SCHOOL_EMAIL_PATTERN = /\.(edu|k12\..{2,3}\.(us|ca|uk))$/i;
-
-export function validateSchoolEmail(email: string): boolean {
+// Basic email domain extractor — actual authorization is enforced by Firestore
+// (superadmin must approve the school domain before anyone can sign up with it)
+export function extractDomain(email: string): string | null {
   const domain = email.split("@")[1];
-  if (!domain) return false;
-  return SCHOOL_EMAIL_PATTERN.test(domain);
+  return domain ? domain.toLowerCase() : null;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -80,11 +78,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signUp = async ({ email, password, name, grade, role }: SignUpParams) => {
-    if (!validateSchoolEmail(email)) {
-      throw new Error("Only school email addresses (.edu or .k12) are accepted.");
+    const domain = email.split("@")[1]?.toLowerCase();
+    if (!domain) {
+      throw new Error("Enter a valid email address.");
     }
-
-    const domain = email.split("@")[1];
 
     // Check domain is registered and approved in Firestore
     const schoolSnap = await getDoc(doc(db, "schools", domain));
