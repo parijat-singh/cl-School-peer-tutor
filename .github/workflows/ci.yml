@@ -185,13 +185,19 @@ jobs:
           Write-Host "✅ Loaded secrets from $envFile"
 
       - name: Notify success
+        env:
+          GH_SHA:    ${{ github.sha }}
+          GH_BRANCH: ${{ github.ref_name }}
+          GH_ACTOR:  ${{ github.actor }}
+          GH_MSG:    ${{ github.event.head_commit.message }}
+          GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          $shortSha = "${{ github.sha }}".Substring(0, 7)
+          $shortSha = $env:GH_SHA.Substring(0, 7)
           $body = @{
             from    = "SPT Admin <$env:SMTP_FROM_EMAIL>"
             to      = @($env:SUPER_ADMIN_EMAIL)
-            subject = "✅ CI Passed - ${{ github.ref_name }} ($shortSha)"
-            html    = "<div style='font-family:sans-serif;max-width:600px'><div style='background:#16a34a;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0'><h2 style='margin:0'>✅ CI Pipeline Passed</h2></div><div style='padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px'><table style='width:100%;border-collapse:collapse'><tr><td style='padding:8px 0;color:#6b7280;width:140px'>Branch</td><td style='padding:8px 0;font-weight:600'>${{ github.ref_name }}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Commit</td><td style='padding:8px 0;font-family:monospace'>$shortSha</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Author</td><td style='padding:8px 0'>${{ github.actor }}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Message</td><td style='padding:8px 0'>${{ github.event.head_commit.message }}</td></tr></table><div style='margin-top:20px'><a href='${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}' style='background:#2563eb;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block'>View Run →</a></div><p style='color:#6b7280;font-size:13px;margin-top:20px'>All 4 checks passed: Secrets scan, Dependency audit, SAST (CodeQL), E2E tests.</p></div></div>"
+            subject = "CI Passed - $env:GH_BRANCH ($shortSha)"
+            html    = "<div style='font-family:sans-serif;max-width:600px'><div style='background:#16a34a;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0'><h2 style='margin:0'>CI Pipeline Passed</h2></div><div style='padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px'><table style='width:100%;border-collapse:collapse'><tr><td style='padding:8px 0;color:#6b7280;width:140px'>Branch</td><td style='padding:8px 0;font-weight:600'>$env:GH_BRANCH</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Commit</td><td style='padding:8px 0;font-family:monospace'>$shortSha</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Author</td><td style='padding:8px 0'>$env:GH_ACTOR</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Message</td><td style='padding:8px 0'>$env:GH_MSG</td></tr></table><div style='margin-top:20px'><a href='$env:GH_RUN_URL' style='background:#2563eb;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block'>View Run</a></div><p style='color:#6b7280;font-size:13px;margin-top:20px'>All 4 checks passed: Secrets scan, Dependency audit, SAST (CodeQL), E2E tests.</p></div></div>"
           } | ConvertTo-Json
           Invoke-RestMethod -Uri "https://api.resend.com/emails" `
             -Method POST `
@@ -228,19 +234,29 @@ jobs:
           }
 
       - name: Send failure alert email
+        env:
+          GH_SHA:             ${{ github.sha }}
+          GH_BRANCH:          ${{ github.ref_name }}
+          GH_ACTOR:           ${{ github.actor }}
+          GH_MSG:             ${{ github.event.head_commit.message }}
+          GH_RUN_URL:         ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RESULT_SECRETS:     ${{ needs.secret-scan.result }}
+          RESULT_DEPS:        ${{ needs.dependency-scan.result }}
+          RESULT_SAST:        ${{ needs.sast-scan.result }}
+          RESULT_E2E:         ${{ needs.e2e-tests.result }}
         run: |
           $failed = @()
-          if ("${{ needs.secret-scan.result }}"     -eq "failure") { $failed += "• Secrets scan (Gitleaks)" }
-          if ("${{ needs.dependency-scan.result }}" -eq "failure") { $failed += "• Dependency audit (npm audit)" }
-          if ("${{ needs.sast-scan.result }}"       -eq "failure") { $failed += "• SAST analysis (CodeQL)" }
-          if ("${{ needs.e2e-tests.result }}"       -eq "failure") { $failed += "• E2E test suite" }
-          $failedHtml = ($failed | ForEach-Object { "$_<br>" }) -join ""
-          $shortSha   = "${{ github.sha }}".Substring(0, 7)
+          if ($env:RESULT_SECRETS -eq "failure") { $failed += "Secrets scan (Gitleaks)" }
+          if ($env:RESULT_DEPS    -eq "failure") { $failed += "Dependency audit (npm audit)" }
+          if ($env:RESULT_SAST    -eq "failure") { $failed += "SAST analysis (CodeQL)" }
+          if ($env:RESULT_E2E     -eq "failure") { $failed += "E2E test suite" }
+          $failedHtml = ($failed | ForEach-Object { "- $_<br>" }) -join ""
+          $shortSha   = $env:GH_SHA.Substring(0, 7)
           $body = @{
             from    = "SPT Admin <$env:SMTP_FROM_EMAIL>"
             to      = @($env:SUPER_ADMIN_EMAIL)
-            subject = "🚨 CI FAILED - ${{ github.ref_name }} - Action Required"
-            html    = "<div style='font-family:sans-serif;max-width:600px'><div style='background:#dc2626;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0'><h2 style='margin:0'>🚨 CI Pipeline Failed</h2><p style='margin:8px 0 0;opacity:0.9'>Immediate action required - deploy is blocked</p></div><div style='padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px'><table style='width:100%;border-collapse:collapse'><tr><td style='padding:8px 0;color:#6b7280;width:140px'>Branch</td><td style='padding:8px 0;font-weight:600'>${{ github.ref_name }}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Commit</td><td style='padding:8px 0;font-family:monospace'>$shortSha</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Author</td><td style='padding:8px 0'>${{ github.actor }}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Message</td><td style='padding:8px 0'>${{ github.event.head_commit.message }}</td></tr><tr><td style='padding:8px 0;color:#6b7280;vertical-align:top'>Failed checks</td><td style='padding:8px 0;color:#dc2626;font-weight:600'>$failedHtml</td></tr></table><div style='margin-top:20px'><a href='${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}' style='background:#dc2626;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block'>View Failure Logs →</a></div></div></div>"
+            subject = "CI FAILED - $env:GH_BRANCH - Action Required"
+            html    = "<div style='font-family:sans-serif;max-width:600px'><div style='background:#dc2626;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0'><h2 style='margin:0'>CI Pipeline Failed</h2><p style='margin:8px 0 0;opacity:0.9'>Deploy is blocked</p></div><div style='padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px'><table style='width:100%;border-collapse:collapse'><tr><td style='padding:8px 0;color:#6b7280;width:140px'>Branch</td><td style='padding:8px 0;font-weight:600'>$env:GH_BRANCH</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Commit</td><td style='padding:8px 0;font-family:monospace'>$shortSha</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Author</td><td style='padding:8px 0'>$env:GH_ACTOR</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Message</td><td style='padding:8px 0'>$env:GH_MSG</td></tr><tr><td style='padding:8px 0;color:#6b7280;vertical-align:top'>Failed</td><td style='padding:8px 0;color:#dc2626;font-weight:600'>$failedHtml</td></tr></table><div style='margin-top:20px'><a href='$env:GH_RUN_URL' style='background:#dc2626;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block'>View Failure Logs</a></div></div></div>"
           } | ConvertTo-Json
           Invoke-RestMethod -Uri "https://api.resend.com/emails" `
             -Method POST `
