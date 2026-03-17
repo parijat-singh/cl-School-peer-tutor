@@ -196,7 +196,7 @@ export function Layout() {
               <div className="w-5 h-5 rounded bg-brand-500 flex items-center justify-center">
                 <BookOpen className="w-3 h-3 text-white" />
               </div>
-              <span className="text-sm font-display font-semibold text-gray-700">PeerTutor</span>
+              <span className="text-sm font-display font-semibold text-gray-700">School PeerTutor</span>
             </div>
             <div className="flex items-center gap-4 text-xs text-gray-500">
               <NavLink to="/contact" className="hover:text-brand-500 transition-colors">
@@ -211,7 +211,7 @@ export function Layout() {
           {/* Copyright row */}
           <div className="border-t border-gray-100 pt-3 flex flex-col sm:flex-row items-center justify-between gap-2">
             <p className="text-xs text-gray-400">
-              &copy; {new Date().getFullYear()} PeerTutor. All rights reserved.
+              &copy; {new Date().getFullYear()} School PeerTutor. All rights reserved.
             </p>
             <p className="text-xs text-gray-400 text-center sm:text-right max-w-md">
               The design, concept, branding, and software of this platform are protected by copyright.
