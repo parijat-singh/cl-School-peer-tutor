@@ -42,7 +42,7 @@ const emulatorHost = import.meta.env.VITE_EMULATOR_HOST ?? "localhost";
 
 if (useEmulators) {
   connectAuthEmulator(auth, `http://${emulatorHost}:9099`, { disableWarnings: true });
-  connectFirestoreEmulator(db, emulatorHost, 8080);
+  connectFirestoreEmulator(db, emulatorHost, 8090);
   connectFunctionsEmulator(fns, emulatorHost, 5001);
   connectStorageEmulator(storage, emulatorHost, 9199);
   console.info("[PeerTutor] Using Firebase Emulators");

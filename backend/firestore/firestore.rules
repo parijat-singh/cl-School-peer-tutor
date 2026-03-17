@@ -159,9 +159,15 @@ service cloud.firestore {
     // Tutee creates requests; tutor accepts/rejects; both can read their own.
 
     match /bookingRequests/{requestId} {
-      // Tutee or tutor on the request can read it
-      allow read: if isSignedIn() &&
+      // Single-document read: tutee or tutor on the request
+      allow get: if isSignedIn() &&
         (resource.data.tuteeId == uid() || resource.data.tutorId == uid());
+
+      // Collection list queries: signed-in users only.
+      // Security relies on the client always querying with
+      //   where("tuteeId","==",uid) or where("tutorId","==",uid)
+      // Cloud Functions use Admin SDK (bypasses rules entirely).
+      allow list: if isSignedIn();
 
       // Only the tutee can create a request for themselves
       allow create: if isSignedIn() &&
