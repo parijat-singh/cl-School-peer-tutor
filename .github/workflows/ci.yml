@@ -157,57 +157,88 @@ jobs:
   # ──────────────────────────────────────────────────────────────────
   ci-passed:
     name: "CI passed"
-    runs-on: ubuntu-latest
+    # Runs on your machine so it can read .env.production for email credentials
+    runs-on: self-hosted
     needs: [secret-scan, dependency-scan, sast-scan, e2e-tests]
     steps:
       - name: All checks passed
-        run: echo "All checks passed ✅  Safe to deploy via scripts/deploy.sh"
+        run: echo "All checks passed — safe to deploy"
+
+      - name: Load .env.production
+        run: |
+          # Resolve .env.production from the runner's known machine path
+          for CANDIDATE in \
+            "$HOME/OneDrive/Documents/Coding/cl-School-peer-tutor/.env.production" \
+            "C:/Users/user/OneDrive/Documents/Coding/cl-School-peer-tutor/.env.production" \
+            "$SECRETS_FILE"; do
+            if [ -f "$CANDIDATE" ]; then
+              set -a; source "$CANDIDATE"; set +a
+              while IFS= read -r line || [ -n "$line" ]; do
+                [[ "$line" =~ ^#.*$ ]] && continue
+                [[ -z "$line" ]]       && continue
+                echo "$line" >> "$GITHUB_ENV"
+              done < "$CANDIDATE"
+              echo "Loaded secrets from $CANDIDATE"
+              break
+            fi
+          done
 
       - name: Notify success
         run: |
+          SHORT_SHA="${{ github.sha }}"
+          SHORT_SHA="${SHORT_SHA:0:7}"
           curl -s -X POST https://api.resend.com/emails \
-            -H "Authorization: Bearer ${{ secrets.RESEND_API_KEY }}" \
+            -H "Authorization: Bearer $SMTP_PASS" \
             -H "Content-Type: application/json" \
-            -d '{
-              "from": "SPT Admin <admin@schoolpeertutor.com>",
-              "to": ["${{ secrets.ALERT_EMAIL }}"],
-              "subject": "✅ CI Passed — ${{ github.ref_name }} (${{ github.sha }})",
-              "html": "<div style=\"font-family:sans-serif;max-width:600px\"><div style=\"background:#16a34a;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0\"><h2 style=\"margin:0\">✅ CI Pipeline Passed</h2></div><div style=\"padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px\"><table style=\"width:100%;border-collapse:collapse\"><tr><td style=\"padding:8px 0;color:#6b7280;width:140px\">Branch</td><td style=\"padding:8px 0;font-weight:600\">${{ github.ref_name }}</td></tr><tr><td style=\"padding:8px 0;color:#6b7280\">Commit</td><td style=\"padding:8px 0;font-family:monospace\">${{ github.sha }}</td></tr><tr><td style=\"padding:8px 0;color:#6b7280\">Triggered by</td><td style=\"padding:8px 0\">${{ github.actor }}</td></tr><tr><td style=\"padding:8px 0;color:#6b7280\">Message</td><td style=\"padding:8px 0\">${{ github.event.head_commit.message }}</td></tr></table><div style=\"margin-top:20px\"><a href=\"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\" style=\"background:#2563eb;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block\">View Run Logs →</a></div><p style=\"color:#6b7280;font-size:13px;margin-top:20px\">All 4 checks passed: Secrets scan, Dependency audit, SAST (CodeQL), E2E tests. Safe to deploy.</p></div></div>"
-            }'
+            -d "{
+              \"from\": \"SPT Admin <$SMTP_FROM_EMAIL>\",
+              \"to\": [\"$SUPER_ADMIN_EMAIL\"],
+              \"subject\": \"✅ CI Passed — ${{ github.ref_name }} (${SHORT_SHA})\",
+              \"html\": \"<div style='font-family:sans-serif;max-width:600px'><div style='background:#16a34a;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0'><h2 style='margin:0'>✅ CI Pipeline Passed</h2></div><div style='padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px'><table style='width:100%;border-collapse:collapse'><tr><td style='padding:8px 0;color:#6b7280;width:140px'>Branch</td><td style='padding:8px 0;font-weight:600'>${{ github.ref_name }}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Commit</td><td style='padding:8px 0;font-family:monospace'>${SHORT_SHA}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Author</td><td style='padding:8px 0'>${{ github.actor }}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Message</td><td style='padding:8px 0'>${{ github.event.head_commit.message }}</td></tr></table><div style='margin-top:20px'><a href='${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}' style='background:#2563eb;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block'>View Run →</a></div><p style='color:#6b7280;font-size:13px;margin-top:20px'>All 4 checks passed: Secrets scan, Dependency audit, SAST (CodeQL), E2E tests.</p></div></div>\"
+            }"
 
   # ──────────────────────────────────────────────────────────────────
-  # NOTIFY ON FAILURE — runs when any job above fails.
-  # Sends an email with the failed job name, branch, commit, and a
-  # direct link to the run logs so you can investigate immediately.
+  # NOTIFY ON FAILURE — runs on your machine so it can read
+  # .env.production for email credentials without storing in GitHub.
   # ──────────────────────────────────────────────────────────────────
   notify-failure:
     name: "Notify: CI failed"
-    runs-on: ubuntu-latest
-    # Only run if at least one upstream job failed and this is not already a success
+    runs-on: self-hosted
     needs: [secret-scan, dependency-scan, sast-scan, e2e-tests]
     if: failure()
     steps:
-      - name: Determine which jobs failed
-        id: failed-jobs
+      - name: Load .env.production
         run: |
-          FAILED=""
-          [ "${{ needs.secret-scan.result }}"     = "failure" ] && FAILED="${FAILED}• Secrets scan (Gitleaks)\n"
-          [ "${{ needs.dependency-scan.result }}" = "failure" ] && FAILED="${FAILED}• Dependency audit (npm audit)\n"
-          [ "${{ needs.sast-scan.result }}"       = "failure" ] && FAILED="${FAILED}• SAST analysis (CodeQL)\n"
-          [ "${{ needs.e2e-tests.result }}"       = "failure" ] && FAILED="${FAILED}• E2E test suite\n"
-          echo "list=${FAILED}" >> $GITHUB_OUTPUT
+          for CANDIDATE in \
+            "$HOME/OneDrive/Documents/Coding/cl-School-peer-tutor/.env.production" \
+            "C:/Users/user/OneDrive/Documents/Coding/cl-School-peer-tutor/.env.production" \
+            "$SECRETS_FILE"; do
+            if [ -f "$CANDIDATE" ]; then
+              set -a; source "$CANDIDATE"; set +a
+              while IFS= read -r line || [ -n "$line" ]; do
+                [[ "$line" =~ ^#.*$ ]] && continue
+                [[ -z "$line" ]]       && continue
+                echo "$line" >> "$GITHUB_ENV"
+              done < "$CANDIDATE"
+              break
+            fi
+          done
 
       - name: Send failure alert email
         run: |
-          FAILED_JOBS=$(printf "${{ steps.failed-jobs.outputs.list }}")
+          FAILED=""
+          [ "${{ needs.secret-scan.result }}"     = "failure" ] && FAILED="$FAILED• Secrets scan (Gitleaks)<br>"
+          [ "${{ needs.dependency-scan.result }}" = "failure" ] && FAILED="$FAILED• Dependency audit (npm audit)<br>"
+          [ "${{ needs.sast-scan.result }}"       = "failure" ] && FAILED="$FAILED• SAST analysis (CodeQL)<br>"
+          [ "${{ needs.e2e-tests.result }}"       = "failure" ] && FAILED="$FAILED• E2E test suite<br>"
+          SHORT_SHA="${{ github.sha }}"
+          SHORT_SHA="${SHORT_SHA:0:7}"
           curl -s -X POST https://api.resend.com/emails \
-            -H "Authorization: Bearer ${{ secrets.RESEND_API_KEY }}" \
+            -H "Authorization: Bearer $SMTP_PASS" \
             -H "Content-Type: application/json" \
-            -d @- <<EOF
-          {
-            "from": "SPT Admin <admin@schoolpeertutor.com>",
-            "to": ["${{ secrets.ALERT_EMAIL }}"],
-            "subject": "🚨 CI FAILED — ${{ github.ref_name }} — Action Required",
-            "html": "<div style=\"font-family:sans-serif;max-width:600px\"><div style=\"background:#dc2626;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0\"><h2 style=\"margin:0\">🚨 CI Pipeline Failed</h2><p style=\"margin:8px 0 0;opacity:0.9\">Immediate action required</p></div><div style=\"padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px\"><table style=\"width:100%;border-collapse:collapse\"><tr><td style=\"padding:8px 0;color:#6b7280;width:140px\">Branch</td><td style=\"padding:8px 0;font-weight:600\">${{ github.ref_name }}</td></tr><tr><td style=\"padding:8px 0;color:#6b7280\">Commit</td><td style=\"padding:8px 0;font-family:monospace\">${{ github.sha }}</td></tr><tr><td style=\"padding:8px 0;color:#6b7280\">Author</td><td style=\"padding:8px 0\">${{ github.actor }}</td></tr><tr><td style=\"padding:8px 0;color:#6b7280\">Commit msg</td><td style=\"padding:8px 0\">${{ github.event.head_commit.message }}</td></tr><tr><td style=\"padding:8px 0;color:#6b7280;vertical-align:top\">Failed jobs</td><td style=\"padding:8px 0;color:#dc2626;font-weight:600\">${{ needs.secret-scan.result == 'failure' && '• Secrets scan' || '' }} ${{ needs.dependency-scan.result == 'failure' && '• Dependency audit' || '' }} ${{ needs.sast-scan.result == 'failure' && '• SAST (CodeQL)' || '' }} ${{ needs.e2e-tests.result == 'failure' && '• E2E tests' || '' }}</td></tr></table><div style=\"margin-top:20px\"><a href=\"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\" style=\"background:#dc2626;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block\">View Failure Logs →</a></div></div></div>"
-          }
-          EOF
+            -d "{
+              \"from\": \"SPT Admin <$SMTP_FROM_EMAIL>\",
+              \"to\": [\"$SUPER_ADMIN_EMAIL\"],
+              \"subject\": \"🚨 CI FAILED — ${{ github.ref_name }} — Action Required\",
+              \"html\": \"<div style='font-family:sans-serif;max-width:600px'><div style='background:#dc2626;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0'><h2 style='margin:0'>🚨 CI Pipeline Failed</h2><p style='margin:8px 0 0;opacity:0.9'>Immediate action required — deploy is blocked</p></div><div style='padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px'><table style='width:100%;border-collapse:collapse'><tr><td style='padding:8px 0;color:#6b7280;width:140px'>Branch</td><td style='padding:8px 0;font-weight:600'>${{ github.ref_name }}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Commit</td><td style='padding:8px 0;font-family:monospace'>${SHORT_SHA}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Author</td><td style='padding:8px 0'>${{ github.actor }}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Message</td><td style='padding:8px 0'>${{ github.event.head_commit.message }}</td></tr><tr><td style='padding:8px 0;color:#6b7280;vertical-align:top'>Failed</td><td style='padding:8px 0;color:#dc2626;font-weight:600'>${FAILED}</td></tr></table><div style='margin-top:20px'><a href='${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}' style='background:#dc2626;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block'>View Failure Logs →</a></div></div></div>\"
+            }"
