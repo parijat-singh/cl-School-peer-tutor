@@ -121,7 +121,7 @@ jobs:
         working-directory: backend
         run: |
           firebase deploy `
-            --only functions,firestore:rules,storage `
+            --only "functions,firestore:rules,storage" `
             --project $env:FIREBASE_PROJECT_ID `
             --non-interactive
 
