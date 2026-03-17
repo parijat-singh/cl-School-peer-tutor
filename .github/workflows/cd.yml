@@ -21,6 +21,14 @@ on:
     workflows: ["CI"]
     types: [completed]
     branches: [master]
+  # Manual trigger — use when the self-hosted runner was offline when CI
+  # completed and the workflow_run event was missed.
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Git SHA to deploy (leave blank for latest master)"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -30,8 +38,9 @@ jobs:
     name: "Deploy: S3 + CloudFront + Firebase"
     # !! Runs on your machine - not GitHub's servers !!
     runs-on: self-hosted
-    # Only deploy when CI passed - never deploy a broken build
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    # Auto-trigger: only deploy when CI passed.
+    # Manual trigger (workflow_dispatch): always deploy — operator is responsible.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     defaults:
       run:
         shell: powershell
@@ -40,7 +49,9 @@ jobs:
       # ── Checkout the exact commit that passed CI ───────────────────────────
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          # workflow_run: use the SHA that passed CI.
+          # workflow_dispatch: use the provided SHA or fall back to HEAD.
+          ref: ${{ inputs.sha || github.event.workflow_run.head_sha || github.sha }}
 
       # ── Load secrets from local .env.production ────────────────────────────
       # This file lives only on your machine and is never committed to git.
@@ -138,8 +149,8 @@ jobs:
       - name: Send deployment success email
         if: success()
         env:
-          GH_SHA:     ${{ github.event.workflow_run.head_sha }}
-          GH_TITLE:   ${{ github.event.workflow_run.display_title }}
+          GH_SHA:     ${{ inputs.sha || github.event.workflow_run.head_sha || github.sha }}
+          GH_TITLE:   ${{ github.event.workflow_run.display_title || 'manual dispatch' }}
           GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           CF_ID:      ${{ steps.invalidate.outputs.invalidation_id }}
         run: |
@@ -159,8 +170,8 @@ jobs:
       - name: Send deployment failure email
         if: failure()
         env:
-          GH_SHA:     ${{ github.event.workflow_run.head_sha }}
-          GH_TITLE:   ${{ github.event.workflow_run.display_title }}
+          GH_SHA:     ${{ inputs.sha || github.event.workflow_run.head_sha || github.sha }}
+          GH_TITLE:   ${{ github.event.workflow_run.display_title || 'manual dispatch' }}
           GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           $shortSha = $env:GH_SHA.Substring(0, 7)
