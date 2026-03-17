@@ -32,6 +32,9 @@ jobs:
     runs-on: self-hosted
     # Only deploy when CI passed — never deploy a broken build
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    defaults:
+      run:
+        shell: bash
 
     steps:
       # ── Checkout the exact commit that passed CI ───────────────────────────
