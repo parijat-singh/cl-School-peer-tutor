@@ -231,9 +231,8 @@ Before going live, complete the following.
 
 - [ ] Create a Firebase project and enable Auth (Email/Password), Firestore, Storage, and Functions.
 - [ ] From `backend/`: `firebase use <project-id>`, then deploy rules and indexes: `firebase deploy --only firestore:rules,firestore:indexes,storage`.
-- [ ] Set function secrets (one-time):  
-  `firebase functions:secrets:set SENTRY_DSN`  
-  and any of: `SENDGRID_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_CALENDAR_PRIVATE_KEY`, `GOOGLE_CALENDAR_CLIENT_EMAIL`, `SUPER_ADMIN_EMAIL` (see `.env.production.example`).
+- [ ] Add GitHub Secret **`SENTRY_DSN`** (Sentry DSN) — CD injects it into functions at deploy. Do not use Secret Manager for `SENTRY_DSN` (Cloud Run overlap error).
+- [ ] Optionally set other secrets via `firebase functions:secrets:set …` or Cloud Console (see `.env.production.example`).
 - [ ] Generate a CI token: `firebase login:ci` and add `FIREBASE_TOKEN` to GitHub Secrets.
 - [ ] Add Firebase web config to GitHub Secrets: `FIREBASE_PROJECT_ID`, `FIREBASE_API_KEY`, `FIREBASE_AUTH_DOMAIN`, `FIREBASE_STORAGE_BUCKET`, `FIREBASE_MESSAGING_SENDER_ID`, `FIREBASE_APP_ID` (for frontend build).
 

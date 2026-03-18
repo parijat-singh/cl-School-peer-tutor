@@ -2,8 +2,8 @@
 // Sentry error tracking for Cloud Functions.
 // Initialised once at cold start; imported by index.ts before any function exports.
 //
-// SENTRY_DSN is provided by Firebase Secret Manager (set via firebase functions:secrets:set SENTRY_DSN)
-// and declared in index.ts via setGlobalOptions({ secrets: ["SENTRY_DSN"] }). It is injected as process.env.SENTRY_DSN.
+// SENTRY_DSN is set at deploy time (GitHub CD writes backend/functions/.env) or locally via .env.
+// Do not use Secret Manager for the same env var name — it overlaps plain env on Cloud Run.
 
 import * as Sentry from "@sentry/node";
 

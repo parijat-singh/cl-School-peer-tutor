@@ -1,10 +1,9 @@
 // functions/src/index.ts
 // Central export of all Cloud Functions
 
-// SENTRY_DSN is provided via Firebase Secret Manager (firebase functions:secrets:set SENTRY_DSN).
-// It is injected as process.env.SENTRY_DSN at runtime for all v2 functions.
-import { setGlobalOptions } from "firebase-functions/v2";
-setGlobalOptions({ secrets: ["SENTRY_DSN"] });
+// SENTRY_DSN must be a single source: plain env at deploy time (see CD workflow writing
+// backend/functions/.env). Do NOT also bind the same name via Secret Manager — Cloud Run
+// rejects "Secret environment variable overlaps non secret env" for SENTRY_DSN.
 
 // Initialise Sentry before any function code runs (at cold start).
 import "./lib/sentry";

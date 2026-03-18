@@ -18,7 +18,8 @@ name: CD - Deploy to Production
 #   FIREBASE_API_KEY, FIREBASE_AUTH_DOMAIN, FIREBASE_STORAGE_BUCKET,
 #   FIREBASE_MESSAGING_SENDER_ID, FIREBASE_APP_ID
 #   SMTP_PASS, SMTP_FROM_EMAIL, SUPER_ADMIN_EMAIL
-#   (Optional: VITE_SENTRY_DSN for frontend Sentry. Backend SENTRY_DSN: set via firebase functions:secrets:set)
+#   SENTRY_DSN (backend Cloud Functions — written to functions/.env at deploy; required for Sentry)
+#   Optional: VITE_SENTRY_DSN (frontend)
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
@@ -143,8 +144,17 @@ jobs:
           fi
           echo "Functions build output verified"
 
-      # SENTRY_DSN is provided via Firebase Secret Manager (firebase functions:secrets:set SENTRY_DSN).
-      # See backend/functions README or repo Production checklist.
+      # Plain env only — Secret Manager binding for the same name causes Cloud Run 400 overlap errors.
+      - name: Write functions runtime env for deploy
+        env:
+          SENTRY_DSN:     ${{ secrets.SENTRY_DSN }}
+          SENTRY_RELEASE: ${{ inputs.sha || github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          {
+            echo "SENTRY_DSN=${SENTRY_DSN}"
+            echo "SENTRY_RELEASE=${SENTRY_RELEASE}"
+          } >> backend/functions/.env
+
       - name: Deploy to Firebase
         working-directory: backend
         run: |

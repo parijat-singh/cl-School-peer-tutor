@@ -149,28 +149,14 @@ Function secrets are stored in **Google Cloud Secret Manager** and are available
   ```
   Replace `peertutor-prod` with your project ID if different.
 
-### 2.2 Required: SENTRY_DSN
+### 2.2 Required: SENTRY_DSN (GitHub Secret, not Secret Manager)
 
-Sentry is used for error tracking in Cloud Functions. The code expects the secret name **SENTRY_DSN**.
+Cloud Run returns **400** if `SENTRY_DSN` is bound as both a **secret** and a **plain** env var. This repo deploys Sentry via **GitHub Actions secret `SENTRY_DSN`**, which CD writes to `backend/functions/.env` before deploy.
 
-1. In [Sentry](https://sentry.io), open your project (or create one for Node/Cloud Functions).
-2. Go to **Settings** → **Projects** → **[Your project]** → **Client Keys (DSN)**.
-3. Copy the **DSN** (looks like `https://xxx@xxx.ingest.sentry.io/xxx`).
+1. In [Sentry](https://sentry.io) → your project → **Client Keys (DSN)** — copy the DSN.
+2. GitHub → repo → **Settings** → **Secrets and variables** → **Actions** → add **`SENTRY_DSN`** with that value.
 
-Then run:
-
-```powershell
-cd backend
-firebase functions:secrets:set SENTRY_DSN
-```
-
-When prompted **"Enter a value for SENTRY_DSN"**, paste the DSN and press Enter. The value is stored in Secret Manager and will be available as `process.env.SENTRY_DSN` in your functions.
-
-To confirm (value is masked):
-
-```powershell
-firebase functions:secrets:access SENTRY_DSN
-```
+If you previously ran `firebase functions:secrets:set SENTRY_DSN`, remove that secret in Google Cloud Secret Manager (or ignore it — it is not used by this deploy path) so you do not re-enable duplicate bindings in future experiments.
 
 ### 2.3 Optional: other function secrets
 
@@ -179,13 +165,13 @@ Your functions also read these from `process.env`. They are **not** yet declared
 - **Local/dev:** `.env` (from `.env.example`).
 - **Production:** Either set them as **Firebase secrets** (and add them to `setGlobalOptions` in code) or as **environment variables** in Google Cloud Console (Cloud Functions → your function → Configuration → Environment variables).
 
-If you want to use **Secret Manager** for production, you can set them the same way as SENTRY_DSN. The code would need to be updated to declare them in `setGlobalOptions({ secrets: ["SENTRY_DSN", "SMTP_PASS", ...] })`; until then, use **Google Cloud Console** to set environment variables for your functions.
+If you want to use **Secret Manager** for other vars, declare each name in `setGlobalOptions({ secrets: [...] })` in `backend/functions/src/index.ts` and avoid duplicating the same name as a plain env var.
 
 Common variables your code uses:
 
 | Variable | Used by | Notes |
 |----------|--------|--------|
-| `SENTRY_DSN` | All functions (Sentry) | **Required** — set via `firebase functions:secrets:set SENTRY_DSN` (already in code). |
+| `SENTRY_DSN` | All functions (Sentry) | **Required in prod** — GitHub Actions secret `SENTRY_DSN` (CD writes `backend/functions/.env`). Do not use Secret Manager for the same name. |
 | `SMTP_PASS` | Email (e.g. Resend) | Set in Secret Manager or Cloud Console env. |
 | `SMTP_USER` | Email | Set in Cloud Console env if needed. |
 | `SMTP_FROM_EMAIL`, `SMTP_FROM_NAME` | Email | Set in Cloud Console env. |
@@ -194,7 +180,7 @@ Common variables your code uses:
 | `GOOGLE_CALENDAR_PRIVATE_KEY` | Google Meet | Set in Secret Manager or Cloud Console env (multi-line). |
 | `ANTHROPIC_API_KEY` | Recommendations | Set in Secret Manager or Cloud Console env. |
 
-**Setting a secret via CLI (same pattern as SENTRY_DSN):**
+**Setting a secret via CLI (e.g. SMTP or API keys, not SENTRY_DSN):**
 
 ```powershell
 firebase functions:secrets:set SUPER_ADMIN_EMAIL
@@ -208,11 +194,11 @@ firebase functions:secrets:set SUPER_ADMIN_EMAIL
 3. Under **Runtime environment variables**, add the variable name and value.
 4. Save and redeploy if needed.
 
-For production, prefer **secrets** for sensitive values (passwords, API keys, private keys) and use the CLI as above; add those secret names to `setGlobalOptions` in `backend/functions/src/index.ts` so they are injected at runtime.
+For production, prefer **secrets** for sensitive values (except `SENTRY_DSN`, which uses GitHub + `.env` at deploy).
 
 ### 2.4 Verify
 
-After setting SENTRY_DSN (and any others), deploy functions so they pick up the secrets:
+After adding **`SENTRY_DSN`** to GitHub Secrets (and any other env/secrets), deploy functions:
 
 ```powershell
 cd backend
@@ -236,14 +222,9 @@ aws iam create-access-key --user-name peertutor-github-deploy
 # Add AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, S3_BUCKET, CLOUDFRONT_DISTRIBUTION_ID to GitHub Secrets
 ```
 
-**Firebase (once per project):**
+**Firebase + GitHub:**
 
-```powershell
-cd backend
-firebase use peertutor-prod
-firebase functions:secrets:set SENTRY_DSN
-# Paste Sentry DSN when prompted
-# Optionally: set other secrets (SMTP_PASS, SUPER_ADMIN_EMAIL, etc.)
-```
+- GitHub repo → **Actions secrets**: add **`SENTRY_DSN`** (Sentry project DSN).
+- Optionally: `firebase functions:secrets:set SMTP_PASS` (etc.) and wire in code, or set env in Cloud Console.
 
-After both parts are done, the next successful run of the CD workflow will deploy the frontend to S3/CloudFront, and your functions will have Sentry (and any other secrets you set) available in production.
+After both parts are done, CD deploys frontend and functions; Sentry receives events when `SENTRY_DSN` is set in GitHub.
