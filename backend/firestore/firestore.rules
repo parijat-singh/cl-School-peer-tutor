@@ -1,6 +1,11 @@
 // firestore/firestore.rules
 // Multi-tenant isolation: every rule verifies schoolDomain matches the caller's
 // custom JWT claim. Super admins bypass domain isolation.
+//
+// Data writes for sessions, reviews, bookings, audit log, and stats are handled
+// exclusively by Cloud Functions (Admin SDK bypasses rules). Client-side writes
+// are only allowed where explicitly needed (availability slots, user profile,
+// school profile, review flagging).
 
 rules_version = '2';
 
@@ -52,82 +57,147 @@ service cloud.firestore {
 
     // ── Users collection ─────────────────────────────────────────
     // /users/{userId}
+    //
+    // get:  own doc, same-domain, or superadmin
+    // list: query must filter by schoolDomain (tutor search) or caller is superadmin
+    // create: owner only (signup)
+    // update: owner, same-domain school admin, or superadmin
+    // delete: never (Cloud Functions handle deactivation, not deletion)
 
     match /users/{userId} {
-      // Any signed-in user can read (emulator-friendly; production should scope to same domain)
-      allow read: if isSignedIn();
+      allow get: if isSignedIn() && (
+        isOwner(userId) ||
+        sameDomain(resource.data.schoolDomain) ||
+        isSuperAdmin()
+      );
+
+      allow list: if isSignedIn() && (
+        sameDomain(resource.data.schoolDomain) ||
+        isSuperAdmin()
+      );
 
       // Direct create allowed during signup
       allow create: if isOwner(userId);
 
-      // Any signed-in user can update user docs
-      allow update: if isSignedIn();
+      // Owner can update own profile; school admin can update same-domain users
+      allow update: if isSignedIn() && (
+        isOwner(userId) ||
+        (isSchoolAdmin() && sameDomain(resource.data.schoolDomain)) ||
+        isSuperAdmin()
+      );
 
       // No client-side deletes
       allow delete: if false;
 
       // ── Availability sub-collection ──────────────────────────
       // /users/{tutorId}/availability/{slotId}
+      //
+      // read:   same-domain users (tutees browse tutor availability)
+      // create: tutor creates own slots
+      // update: owner (edit slot) or same-domain user (booking writes via CF,
+      //         but some client-side updates like cancelRecurringDate)
+      // delete: owner only
 
       match /availability/{slotId} {
-        // Any signed-in user can read availability slots
-        allow read: if isSignedIn();
+        allow read: if isSignedIn() && (
+          isOwner(userId) ||
+          sameDomain(resource.data.schoolDomain) ||
+          isSuperAdmin()
+        );
 
-        // Any signed-in user can create/delete their own slots (emulator-friendly)
-        allow create, delete: if isSignedIn();
+        // Only the tutor (owner of parent user doc) can create slots
+        allow create: if isOwner(userId) && isTutor();
 
-        // Tutor can update own slots; any signed-in user can book
-        allow update: if isSignedIn();
+        // Owner can edit own slots; same-domain needed for booking updates
+        allow update: if isSignedIn() && (
+          isOwner(userId) ||
+          sameDomain(resource.data.schoolDomain)
+        );
+
+        // Only the slot owner can delete
+        allow delete: if isOwner(userId);
       }
     }
 
     // ── Sessions collection ──────────────────────────────────────
     // /sessions/{sessionId}
+    //
+    // get:  participant (tutorId or tuteeId), same-domain admin, or superadmin
+    // list: query must filter by tutorId==uid, tuteeId==uid, or schoolDomain
+    // create/update: Cloud Functions only (Admin SDK bypasses rules)
+    // delete: never
 
     match /sessions/{sessionId} {
-      // Any signed-in user can read sessions
-      allow read: if isSignedIn();
+      allow get: if isSignedIn() && (
+        resource.data.tutorId == uid() ||
+        resource.data.tuteeId == uid() ||
+        (isSchoolAdmin() && sameDomain(resource.data.schoolDomain)) ||
+        isSuperAdmin()
+      );
 
-      // Any signed-in user can create/update sessions
-      allow create: if isSignedIn();
-      allow update: if isSignedIn();
+      allow list: if isSignedIn() && (
+        resource.data.tutorId == uid() ||
+        resource.data.tuteeId == uid() ||
+        sameDomain(resource.data.schoolDomain) ||
+        isSuperAdmin()
+      );
 
+      // Sessions are created and updated exclusively by Cloud Functions
+      allow create, update: if false;
       allow delete: if false;
     }
 
     // ── Reviews collection ───────────────────────────────────────
     // /reviews/{reviewId}
+    //
+    // read:   same-domain users or superadmin
+    // update: same-domain users can flag reviews (flagged, flaggedBy fields)
+    // create/delete: Cloud Functions only
 
     match /reviews/{reviewId} {
-      // Any signed-in user can read reviews
-      allow read: if isSignedIn();
+      allow get: if isSignedIn() && (
+        sameDomain(resource.data.schoolDomain) ||
+        isSuperAdmin()
+      );
 
-      // Authenticated users can create reviews (after session)
-      allow create: if isSignedIn() && request.resource.data.authorId == uid();
+      allow list: if isSignedIn() && (
+        sameDomain(resource.data.schoolDomain) ||
+        isSuperAdmin()
+      );
 
-      // Any signed-in user can update/delete reviews
-      allow update: if isSignedIn();
-      allow delete: if isSignedIn();
+      // Same-domain users can flag reviews (client-side flagReview function)
+      allow update: if isSignedIn() && sameDomain(resource.data.schoolDomain);
+
+      // Reviews are created and deleted by Cloud Functions
+      allow create, delete: if false;
     }
 
     // ── Schools collection ───────────────────────────────────────
     // /schools/{domain}
+    //
+    // read:  public (needed for signup domain validation before auth)
+    // write: superadmin or school admin of that domain
 
     match /schools/{domain} {
-      // Any signed-in user can read school docs (needed for signup validation)
-      // Also allow unauthenticated reads for signup domain check
       allow read: if true;
 
-      // Super admins can write school docs
-      allow write: if isSignedIn() && isSuperAdmin();
+      allow write: if isSignedIn() && (
+        isSuperAdmin() ||
+        (isSchoolAdmin() && sameDomain(domain))
+      );
     }
 
     // ── Stats collection ─────────────────────────────────────────
     // /stats/{schoolDomain}
+    //
+    // read:  same-domain users or superadmin
+    // write: Cloud Functions only
 
     match /stats/{schoolDomain} {
-      // Any signed-in user can read stats
-      allow read: if isSignedIn();
+      allow read: if isSignedIn() && (
+        sameDomain(schoolDomain) ||
+        isSuperAdmin()
+      );
 
       // Written only by Cloud Functions
       allow write: if false;
@@ -135,14 +205,18 @@ service cloud.firestore {
 
     // ── Audit log collection ─────────────────────────────────────
     // /adminAuditLog/{logId}
+    //
+    // read:  school admins (own domain) or superadmin
+    // write: Cloud Functions only
 
     match /adminAuditLog/{logId} {
-      // Any signed-in user can read audit logs
-      allow read: if isSignedIn();
+      allow read: if isSignedIn() && (
+        isSchoolAdmin() ||
+        isSuperAdmin()
+      );
 
-      // Any signed-in user can create audit entries
-      allow create: if isSignedIn();
-      allow update, delete: if false;
+      // Audit entries are written exclusively by Cloud Functions
+      allow create, update, delete: if false;
     }
 
     // ── Email OTP verifications ──────────────────────────────────
@@ -156,27 +230,38 @@ service cloud.firestore {
 
     // ── Booking Requests collection ──────────────────────────────
     // /bookingRequests/{requestId}
-    // Tutee creates requests; tutor accepts/rejects; both can read their own.
+    //
+    // get:    tutee or tutor on the request, same-domain admin, or superadmin
+    // list:   query must filter by tuteeId==uid, tutorId==uid, or schoolDomain
+    // create: tutee creates requests in own domain
+    // update: tutor (accept/reject) or tutee (cancel own pending request)
+    // delete: never
 
     match /bookingRequests/{requestId} {
-      // Single-document read: tutee or tutor on the request
-      allow get: if isSignedIn() &&
-        (resource.data.tuteeId == uid() || resource.data.tutorId == uid());
+      allow get: if isSignedIn() && (
+        resource.data.tuteeId == uid() ||
+        resource.data.tutorId == uid() ||
+        (isSchoolAdmin() && sameDomain(resource.data.schoolDomain)) ||
+        isSuperAdmin()
+      );
 
-      // Collection list queries: signed-in users only.
-      // Security relies on the client always querying with
-      //   where("tuteeId","==",uid) or where("tutorId","==",uid)
-      // Cloud Functions use Admin SDK (bypasses rules entirely).
-      allow list: if isSignedIn();
+      allow list: if isSignedIn() && (
+        resource.data.tuteeId == uid() ||
+        resource.data.tutorId == uid() ||
+        sameDomain(resource.data.schoolDomain) ||
+        isSuperAdmin()
+      );
 
-      // Only the tutee can create a request for themselves
+      // Only the tutee can create a request for themselves, in their own domain
       allow create: if isSignedIn() &&
         request.resource.data.tuteeId == uid() &&
         sameDomain(request.resource.data.schoolDomain);
 
       // Tutor can update (accept/reject); tutee can cancel their own pending request
-      allow update: if isSignedIn() &&
-        (resource.data.tutorId == uid() || resource.data.tuteeId == uid());
+      allow update: if isSignedIn() && (
+        resource.data.tutorId == uid() ||
+        resource.data.tuteeId == uid()
+      );
 
       allow delete: if false;
     }

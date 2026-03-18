@@ -1,6 +1,10 @@
 // functions/src/index.ts
 // Central export of all Cloud Functions
 
+// Initialise Sentry before any function code runs (at cold start).
+// The import has side effects — it calls Sentry.init() if SENTRY_DSN is set.
+import "./lib/sentry";
+
 export { onUserCreate }         from "./auth/onUserCreate";
 export { bookSession }          from "./bookings/bookSession";
 export { requestBooking }       from "./bookings/requestBooking";

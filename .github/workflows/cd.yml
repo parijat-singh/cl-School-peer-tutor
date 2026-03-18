@@ -83,15 +83,17 @@ jobs:
 
       - name: Build frontend
         working-directory: frontend
-        run: |
-          VITE_FIREBASE_API_KEY="$FIREBASE_API_KEY" \
-          VITE_FIREBASE_AUTH_DOMAIN="$FIREBASE_AUTH_DOMAIN" \
-          VITE_FIREBASE_PROJECT_ID="$FIREBASE_PROJECT_ID" \
-          VITE_FIREBASE_STORAGE_BUCKET="$FIREBASE_STORAGE_BUCKET" \
-          VITE_FIREBASE_MESSAGING_SENDER_ID="$FIREBASE_MESSAGING_SENDER_ID" \
-          VITE_FIREBASE_APP_ID="$FIREBASE_APP_ID" \
-          VITE_USE_EMULATORS=false \
-          npm run build
+        env:
+          VITE_FIREBASE_API_KEY:             ${{ env.FIREBASE_API_KEY }}
+          VITE_FIREBASE_AUTH_DOMAIN:         ${{ env.FIREBASE_AUTH_DOMAIN }}
+          VITE_FIREBASE_PROJECT_ID:          ${{ env.FIREBASE_PROJECT_ID }}
+          VITE_FIREBASE_STORAGE_BUCKET:      ${{ env.FIREBASE_STORAGE_BUCKET }}
+          VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ env.FIREBASE_MESSAGING_SENDER_ID }}
+          VITE_FIREBASE_APP_ID:              ${{ env.FIREBASE_APP_ID }}
+          VITE_USE_EMULATORS:                "false"
+          VITE_SENTRY_DSN:                   ${{ secrets.VITE_SENTRY_DSN }}
+          VITE_GIT_SHA:                      ${{ inputs.sha || github.event.workflow_run.head_sha || github.sha }}
+        run: npm run build
 
       # ── Deploy to S3 ──────────────────────────────────────────────────────
       - name: Sync hashed assets to S3 (long-lived cache)
@@ -139,6 +141,18 @@ jobs:
             exit 1
           fi
           echo "Functions build output verified"
+
+      - name: Inject runtime env vars for Cloud Functions
+        env:
+          SENTRY_DSN:     ${{ secrets.SENTRY_DSN }}
+          SENTRY_RELEASE: ${{ inputs.sha || github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          # Firebase Functions v2 auto-loads .env files at runtime.
+          # Write Sentry vars so they're available via process.env in production.
+          {
+            echo "SENTRY_DSN=${SENTRY_DSN}"
+            echo "SENTRY_RELEASE=${SENTRY_RELEASE}"
+          } >> backend/functions/.env
 
       - name: Deploy to Firebase
         working-directory: backend
