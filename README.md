@@ -196,16 +196,52 @@ firebase deploy --only functions
 
 ## Production Deployment
 
-```bash
-# Build and deploy frontend to Firebase Hosting
-cd frontend
-npm run build
-firebase deploy --only hosting
+**Frontend** is served from **AWS S3 + CloudFront** (not Firebase Hosting). The CD pipeline (GitHub Actions) builds the frontend, syncs to S3, and invalidates CloudFront. To create the AWS resources and deploy manually:
 
-# Or build production Docker image
-docker-compose -f docker-compose.yml -f docker-compose.prod.yml build
-docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+```bash
+# 1. Create AWS infrastructure (one-time; see infra/terraform/README.md)
+cd infra/terraform
+terraform init && terraform apply
+
+# 2. Create IAM access key for GitHub Actions, add to GitHub Secrets (S3_BUCKET, CLOUDFRONT_DISTRIBUTION_ID, AWS_*).
+
+# 3. Deploy from your machine (uses .env.production)
+bash scripts/deploy.sh
 ```
+
+**Firebase** (Functions, Firestore rules, Storage rules) is deployed by the same CD pipeline or via `firebase deploy --only functions,firestore:rules,storage` from `backend/`.
+
+Firestore rules and indexes live under **`backend/firestore/`** — there are no Firestore config files at the repo root.
+
+---
+
+## Production checklist
+
+**Detailed steps:** See **[docs/production-setup-guide.md](docs/production-setup-guide.md)** for step-by-step instructions (Terraform, IAM access key, GitHub Secrets, Firebase secrets).
+
+Before going live, complete the following.
+
+### AWS (frontend)
+
+- [ ] Run `infra/terraform` to create S3 bucket, CloudFront distribution, and IAM user (see `infra/terraform/README.md`).
+- [ ] Create IAM access key for the deploy user; add `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `S3_BUCKET`, `CLOUDFRONT_DISTRIBUTION_ID` to GitHub Secrets.
+- [ ] (Optional) Attach custom domain and ACM certificate via Terraform variables.
+
+### Firebase (backend)
+
+- [ ] Create a Firebase project and enable Auth (Email/Password), Firestore, Storage, and Functions.
+- [ ] From `backend/`: `firebase use <project-id>`, then deploy rules and indexes: `firebase deploy --only firestore:rules,firestore:indexes,storage`.
+- [ ] Set function secrets (one-time):  
+  `firebase functions:secrets:set SENTRY_DSN`  
+  and any of: `SENDGRID_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_CALENDAR_PRIVATE_KEY`, `GOOGLE_CALENDAR_CLIENT_EMAIL`, `SUPER_ADMIN_EMAIL` (see `.env.production.example`).
+- [ ] Generate a CI token: `firebase login:ci` and add `FIREBASE_TOKEN` to GitHub Secrets.
+- [ ] Add Firebase web config to GitHub Secrets: `FIREBASE_PROJECT_ID`, `FIREBASE_API_KEY`, `FIREBASE_AUTH_DOMAIN`, `FIREBASE_STORAGE_BUCKET`, `FIREBASE_MESSAGING_SENDER_ID`, `FIREBASE_APP_ID` (for frontend build).
+
+### Notifications
+
+- [ ] Add Resend (or SMTP) and alert email to GitHub Secrets: `SMTP_PASS`, `SMTP_FROM_EMAIL`, `SUPER_ADMIN_EMAIL`.
+
+Once the checklist is done, pushes to `master` run CI and then CD deploys frontend (S3 + CloudFront) and Firebase (Functions + rules).
 
 ---
 
@@ -257,10 +293,8 @@ firebase functions:log
 
 ---
 
-## Open Items Before Production
+## Open items (optional)
 
-- [ ] Provision real Firebase project and update `.env`
 - [ ] Create SendGrid account and build email templates (5 templates needed)
 - [ ] Create Google Cloud service account with Calendar API + domain-wide delegation
 - [ ] Onboard 2 pilot schools via `registerSchool` callable + ops approval
-- [ ] Set up Firebase Hosting + GitHub Actions CI/CD

@@ -1,8 +1,12 @@
 // functions/src/index.ts
 // Central export of all Cloud Functions
 
+// SENTRY_DSN is provided via Firebase Secret Manager (firebase functions:secrets:set SENTRY_DSN).
+// It is injected as process.env.SENTRY_DSN at runtime for all v2 functions.
+import { setGlobalOptions } from "firebase-functions/v2";
+setGlobalOptions({ secrets: ["SENTRY_DSN"] });
+
 // Initialise Sentry before any function code runs (at cold start).
-// The import has side effects — it calls Sentry.init() if SENTRY_DSN is set.
 import "./lib/sentry";
 
 export { onUserCreate }         from "./auth/onUserCreate";

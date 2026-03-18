@@ -18,6 +18,7 @@ name: CD - Deploy to Production
 #   FIREBASE_API_KEY, FIREBASE_AUTH_DOMAIN, FIREBASE_STORAGE_BUCKET,
 #   FIREBASE_MESSAGING_SENDER_ID, FIREBASE_APP_ID
 #   SMTP_PASS, SMTP_FROM_EMAIL, SUPER_ADMIN_EMAIL
+#   (Optional: VITE_SENTRY_DSN for frontend Sentry. Backend SENTRY_DSN: set via firebase functions:secrets:set)
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
@@ -142,18 +143,8 @@ jobs:
           fi
           echo "Functions build output verified"
 
-      - name: Inject runtime env vars for Cloud Functions
-        env:
-          SENTRY_DSN:     ${{ secrets.SENTRY_DSN }}
-          SENTRY_RELEASE: ${{ inputs.sha || github.event.workflow_run.head_sha || github.sha }}
-        run: |
-          # Firebase Functions v2 auto-loads .env files at runtime.
-          # Write Sentry vars so they're available via process.env in production.
-          {
-            echo "SENTRY_DSN=${SENTRY_DSN}"
-            echo "SENTRY_RELEASE=${SENTRY_RELEASE}"
-          } >> backend/functions/.env
-
+      # SENTRY_DSN is provided via Firebase Secret Manager (firebase functions:secrets:set SENTRY_DSN).
+      # See backend/functions README or repo Production checklist.
       - name: Deploy to Firebase
         working-directory: backend
         run: |

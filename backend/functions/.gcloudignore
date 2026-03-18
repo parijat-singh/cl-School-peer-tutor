@@ -1,0 +1,7 @@
+# Do not upload env files — secrets live in Firebase Secret Manager
+.env
+.env.*
+!.env.example
+
+# Dependencies and build artifacts (Firebase deploys from lib/ or source per firebase.json)
+node_modules/
