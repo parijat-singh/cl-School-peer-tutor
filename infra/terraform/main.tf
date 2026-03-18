@@ -18,12 +18,17 @@ provider "aws" {
   s3_us_east_1_regional_endpoint = "regional"
 }
 
-locals {
-  name_prefix = var.project_name
-  bucket_name = "${local.name_prefix}-frontend-${data.aws_caller_identity.current.account_id}"
-}
-
 data "aws_caller_identity" "current" {}
+
+locals {
+  name_prefix  = var.project_name
+  bucket_name  = "${local.name_prefix}-frontend-${data.aws_caller_identity.current.account_id}"
+  acm_arn_for_cloudfront = var.acm_certificate_arn != "" ? var.acm_certificate_arn : (
+    length(aws_acm_certificate_validation.frontend) > 0 ? aws_acm_certificate_validation.frontend[0].certificate_arn : ""
+  )
+  use_tls_aliases = var.enable_custom_domain && var.domain_name != "" && local.acm_arn_for_cloudfront != ""
+  cloudfront_aliases = local.use_tls_aliases ? [var.domain_name, "www.${var.domain_name}"] : []
+}
 
 # ── S3 bucket (private, no public access) ─────────────────────────────────────
 resource "aws_s3_bucket" "frontend" {
@@ -74,10 +79,6 @@ resource "aws_cloudfront_origin_access_control" "frontend" {
 }
 
 # ── CloudFront distribution ─────────────────────────────────────────────────
-locals {
-  cloudfront_aliases = var.enable_custom_domain && var.domain_name != "" ? [var.domain_name, "www.${var.domain_name}"] : []
-}
-
 resource "aws_cloudfront_distribution" "frontend" {
   enabled             = true
   is_ipv6_enabled     = true
@@ -85,13 +86,23 @@ resource "aws_cloudfront_distribution" "frontend" {
   default_root_object = "index.html"
   price_class         = "PriceClass_100" # US, Canada, Europe
   aliases             = local.cloudfront_aliases
+  web_acl_id          = var.enable_waf ? aws_wafv2_web_acl.frontend[0].arn : null
 
-  viewer_certificate {
-    cloudfront_default_certificate = true
-    # For custom domain: set enable_custom_domain = true, acm_certificate_arn, and replace this block with:
-    # acm_certificate_arn = var.acm_certificate_arn
-    # ssl_support_method  = "sni-only"
-    # minimum_protocol_version = "TLSv1.2_2021"
+  dynamic "viewer_certificate" {
+    for_each = local.use_tls_aliases ? [1] : []
+    content {
+      acm_certificate_arn            = local.acm_arn_for_cloudfront
+      ssl_support_method             = "sni-only"
+      minimum_protocol_version       = "TLSv1.2_2021"
+      cloudfront_default_certificate = false
+    }
+  }
+
+  dynamic "viewer_certificate" {
+    for_each = local.use_tls_aliases ? [] : [1]
+    content {
+      cloudfront_default_certificate = true
+    }
   }
 
   origin {

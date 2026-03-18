@@ -17,9 +17,13 @@ name: CD - Deploy to Production
 #   FIREBASE_PROJECT_ID, FIREBASE_TOKEN  (generate: firebase login:ci)
 #   FIREBASE_API_KEY, FIREBASE_AUTH_DOMAIN, FIREBASE_STORAGE_BUCKET,
 #   FIREBASE_MESSAGING_SENDER_ID, FIREBASE_APP_ID
-#   SMTP_PASS, SMTP_FROM_EMAIL, SUPER_ADMIN_EMAIL
-#   SENTRY_DSN (backend Cloud Functions — written to functions/.env at deploy; required for Sentry)
-#   Optional: VITE_SENTRY_DSN (frontend)
+#   SENTRY_DSN (backend Sentry)
+#   SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM_EMAIL, SMTP_FROM_NAME
+#   SUPER_ADMIN_EMAIL
+#   GOOGLE_CALENDAR_CLIENT_EMAIL, GOOGLE_CALENDAR_PRIVATE_KEY (PEM, multiline OK in GH)
+#   GOOGLE_CALENDAR_ID (optional)
+#   ANTHROPIC_API_KEY (optional — tutor recommendations)
+#   Optional frontend: VITE_SENTRY_DSN, VITE_RECAPTCHA_SITE_KEY (App Check)
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
@@ -94,6 +98,7 @@ jobs:
           VITE_FIREBASE_APP_ID:              ${{ env.FIREBASE_APP_ID }}
           VITE_USE_EMULATORS:                "false"
           VITE_SENTRY_DSN:                   ${{ secrets.VITE_SENTRY_DSN }}
+          VITE_RECAPTCHA_SITE_KEY:           ${{ secrets.VITE_RECAPTCHA_SITE_KEY }}
           VITE_GIT_SHA:                      ${{ inputs.sha || github.event.workflow_run.head_sha || github.sha }}
         run: npm run build
 
@@ -144,22 +149,29 @@ jobs:
           fi
           echo "Functions build output verified"
 
-      # Plain env only — Secret Manager binding for the same name causes Cloud Run 400 overlap errors.
-      - name: Write functions runtime env for deploy
+      # All function runtime config from GitHub Secrets → .env (see scripts/write-functions-deploy-env.mjs)
+      - name: Write Cloud Functions production .env
         env:
-          SENTRY_DSN:     ${{ secrets.SENTRY_DSN }}
-          SENTRY_RELEASE: ${{ inputs.sha || github.event.workflow_run.head_sha || github.sha }}
-        run: |
-          {
-            echo "SENTRY_DSN=${SENTRY_DSN}"
-            echo "SENTRY_RELEASE=${SENTRY_RELEASE}"
-          } >> backend/functions/.env
+          SENTRY_DSN:                      ${{ secrets.SENTRY_DSN }}
+          SENTRY_RELEASE:                  ${{ inputs.sha || github.event.workflow_run.head_sha || github.sha }}
+          SMTP_HOST:                       ${{ secrets.SMTP_HOST }}
+          SMTP_PORT:                       ${{ secrets.SMTP_PORT }}
+          SMTP_USER:                       ${{ secrets.SMTP_USER }}
+          SMTP_PASS:                       ${{ secrets.SMTP_PASS }}
+          SMTP_FROM_EMAIL:                 ${{ secrets.SMTP_FROM_EMAIL }}
+          SMTP_FROM_NAME:                  ${{ secrets.SMTP_FROM_NAME }}
+          SUPER_ADMIN_EMAIL:               ${{ secrets.SUPER_ADMIN_EMAIL }}
+          GOOGLE_CALENDAR_CLIENT_EMAIL:    ${{ secrets.GOOGLE_CALENDAR_CLIENT_EMAIL }}
+          GOOGLE_CALENDAR_PRIVATE_KEY:     ${{ secrets.GOOGLE_CALENDAR_PRIVATE_KEY }}
+          GOOGLE_CALENDAR_ID:              ${{ secrets.GOOGLE_CALENDAR_ID }}
+          ANTHROPIC_API_KEY:               ${{ secrets.ANTHROPIC_API_KEY }}
+        run: node scripts/write-functions-deploy-env.mjs
 
       - name: Deploy to Firebase
         working-directory: backend
         run: |
           FUNCTIONS_DISCOVERY_TIMEOUT=120 firebase deploy \
-            --only "functions,firestore:rules,storage" \
+            --only "functions,firestore:rules,firestore:indexes,storage" \
             --project "$FIREBASE_PROJECT_ID" \
             --token "$FIREBASE_TOKEN" \
             --non-interactive

@@ -25,7 +25,25 @@ variable "acm_certificate_arn" {
 }
 
 variable "enable_custom_domain" {
-  description = "Set to true to attach domain_name and acm_certificate_arn to CloudFront"
+  description = "Attach domain_name to CloudFront (requires issued ACM cert — see acm_certificate_arn or create_acm_certificate+route53)"
+  type        = bool
+  default     = false
+}
+
+variable "create_acm_certificate" {
+  description = "Request ACM cert (us-east-1) for domain + www. Use with route53_zone_id for auto-validation, or add DNS records from terraform output then set acm_certificate_arn."
+  type        = bool
+  default     = false
+}
+
+variable "route53_zone_id" {
+  description = "Hosted zone ID for DNS validation when create_acm_certificate=true (same account)"
+  type        = string
+  default     = ""
+}
+
+variable "enable_waf" {
+  description = "Attach AWS WAF (managed common rule set) to CloudFront — extra cost, reduces abuse"
   type        = bool
   default     = false
 }

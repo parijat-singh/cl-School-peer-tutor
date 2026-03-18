@@ -38,20 +38,19 @@ Add to GitHub → Settings → Secrets and variables → Actions:
 | `S3_BUCKET`            | `terraform output -raw s3_bucket_name` |
 | `CLOUDFRONT_DISTRIBUTION_ID` | `terraform output -raw cloudfront_distribution_id` |
 
-## Custom domain (optional)
+## Custom domain + ACM
 
-1. Create an ACM certificate in **us-east-1** for your domain (e.g. `schoolpeertutor.com`).
-2. Set variables and re-apply:
+- **Own cert:** set `acm_certificate_arn`, `domain_name`, `enable_custom_domain = true`.
+- **Terraform + Route 53:** `create_acm_certificate = true`, `route53_zone_id = "Z..."`, `enable_custom_domain = true`.
+- **Terraform cert, external DNS:** `create_acm_certificate = true`, run `terraform output acm_certificate_validation_records`, add CNAMEs, then set `acm_certificate_arn` after ISSUED.
+
+## WAF (optional)
 
 ```hcl
-# terraform.tfvars (do not commit if it contains sensitive data)
-project_name        = "peertutor"
-domain_name         = "schoolpeertutor.com"
-acm_certificate_arn = "arn:aws:acm:us-east-1:ACCOUNT:certificate/CERT_ID"
-enable_custom_domain = true
+enable_waf = true
 ```
 
-3. Point your DNS to the CloudFront domain (or create a CNAME alias in Route 53).
+Attaches AWS Managed Rules (common rule set). Extra cost per request.
 
 ## What this creates
 

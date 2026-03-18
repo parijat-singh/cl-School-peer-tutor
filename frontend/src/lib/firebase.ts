@@ -18,6 +18,7 @@ import {
   getStorage,
   connectStorageEmulator,
 } from "firebase/storage";
+import { initializeAppCheck, ReCaptchaV3Provider } from "firebase/app-check";
 
 const firebaseConfig = {
   apiKey:            import.meta.env.VITE_FIREBASE_API_KEY,
@@ -46,6 +47,14 @@ if (useEmulators) {
   connectFunctionsEmulator(fns, emulatorHost, 5001);
   connectStorageEmulator(storage, emulatorHost, 9199);
   console.info("[PeerTutor] Using Firebase Emulators");
+} else {
+  const siteKey = import.meta.env.VITE_RECAPTCHA_SITE_KEY;
+  if (siteKey) {
+    initializeAppCheck(app, {
+      provider: new ReCaptchaV3Provider(siteKey),
+      isTokenAutoRefreshEnabled: true,
+    });
+  }
 }
 
 export default app;

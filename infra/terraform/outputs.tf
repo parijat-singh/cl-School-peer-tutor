@@ -29,3 +29,13 @@ output "github_deploy_iam_user_name" {
   description = "IAM user name — use with: aws iam create-access-key --user-name <this>"
   value       = aws_iam_user.github_deploy.name
 }
+
+output "acm_certificate_validation_records" {
+  description = "DNS CNAMEs to create when create_acm_certificate=true and route53_zone_id is empty (validate cert, then set acm_certificate_arn and enable_custom_domain)"
+  value       = length(aws_acm_certificate.frontend) > 0 ? aws_acm_certificate.frontend[0].domain_validation_options : []
+}
+
+output "waf_web_acl_arn" {
+  description = "WAF ACL attached to CloudFront when enable_waf=true"
+  value       = var.enable_waf ? aws_wafv2_web_acl.frontend[0].arn : null
+}

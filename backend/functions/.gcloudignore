@@ -1,4 +1,4 @@
-# Do not upload env files — secrets live in Firebase Secret Manager
+# Do not upload .env — CD writes it locally; Firebase CLI applies vars at deploy (not in zip).
 .env
 .env.*
 !.env.example

@@ -1,0 +1,48 @@
+# Example: GitHub Actions → AWS via OIDC (no long-lived access keys).
+# Copy blocks into main.tf (or merge) after adjusting github_org/repo.
+#
+# 1. Create OIDC provider (once per account):
+#
+# resource "aws_iam_openid_connect_provider" "github" {
+#   url             = "https://token.actions.githubusercontent.com"
+#   client_id_list  = ["sts.amazonaws.com"]
+#   thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"] # GitHub OIDC CA
+# }
+#
+# 2. IAM role trust + policy (S3 + CloudFront same as github_deploy user):
+#
+# data "aws_iam_policy_document" "github_actions_assume" {
+#   statement {
+#     actions = ["sts:AssumeRoleWithWebIdentity"]
+#     principals {
+#       type        = "Federated"
+#       identifiers = [aws_iam_openid_connect_provider.github.arn]
+#     }
+#     condition {
+#       test     = "StringEquals"
+#       variable = "token.actions.githubusercontent.com:aud"
+#       values   = ["sts.amazonaws.com"]
+#     }
+#     condition {
+#       test     = "StringLike"
+#       variable = "token.actions.githubusercontent.com:sub"
+#       values   = ["repo:YOUR_ORG/cl-School-peer-tutor:ref:refs/heads/master"]
+#     }
+#   }
+# }
+#
+# resource "aws_iam_role" "github_deploy_oidc" {
+#   name               = "${local.name_prefix}-github-deploy-oidc"
+#   assume_role_policy = data.aws_iam_policy_document.github_actions_assume.json
+# }
+#
+# resource "aws_iam_role_policy_attachment" "github_deploy_oidc" {
+#   role       = aws_iam_role.github_deploy_oidc.name
+#   policy_arn = aws_iam_policy.github_deploy.arn  # extract policy from aws_iam_user_policy into standalone aws_iam_policy
+# }
+#
+# 3. In CD workflow, replace AWS keys with:
+#    - uses: aws-actions/configure-aws-credentials@v4
+#      with:
+#        role-to-assume: arn:aws:iam::ACCOUNT:role/peertutor-github-deploy-oidc
+#        aws-region: us-east-1

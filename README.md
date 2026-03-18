@@ -209,7 +209,7 @@ terraform init && terraform apply
 bash scripts/deploy.sh
 ```
 
-**Firebase** (Functions, Firestore rules, Storage rules) is deployed by the same CD pipeline or via `firebase deploy --only functions,firestore:rules,storage` from `backend/`.
+**Firebase** (Functions, Firestore rules, **indexes**, Storage) is deployed by CD or via `firebase deploy --only functions,firestore:rules,firestore:indexes,storage` from `backend/`.
 
 Firestore rules and indexes live under **`backend/firestore/`** — there are no Firestore config files at the repo root.
 
@@ -217,30 +217,28 @@ Firestore rules and indexes live under **`backend/firestore/`** — there are no
 
 ## Production checklist
 
-**Detailed steps:** See **[docs/production-setup-guide.md](docs/production-setup-guide.md)** for step-by-step instructions (Terraform, IAM access key, GitHub Secrets, Firebase secrets).
-
-Before going live, complete the following.
+**Detailed steps:** **[docs/production-setup-guide.md](docs/production-setup-guide.md)** · Runbooks: **[token rotation](docs/runbooks/token-and-key-rotation.md)**, **[PITR](docs/runbooks/firestore-pitr-and-backups.md)**, **[App Check / WAF](docs/runbooks/app-check-and-waf.md)**
 
 ### AWS (frontend)
 
-- [ ] Run `infra/terraform` to create S3 bucket, CloudFront distribution, and IAM user (see `infra/terraform/README.md`).
-- [ ] Create IAM access key for the deploy user; add `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `S3_BUCKET`, `CLOUDFRONT_DISTRIBUTION_ID` to GitHub Secrets.
-- [ ] (Optional) Attach custom domain and ACM certificate via Terraform variables.
+- [ ] `infra/terraform apply` — S3, CloudFront, IAM deploy user (see `infra/terraform/README.md`).
+- [ ] IAM access key → GitHub: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `S3_BUCKET`, `CLOUDFRONT_DISTRIBUTION_ID`.
+- [ ] (Optional) Custom domain: `acm_certificate_arn` + `enable_custom_domain`, or `create_acm_certificate` + `route53_zone_id`.
+- [ ] (Optional) `enable_waf = true` for CloudFront WAF.
 
-### Firebase (backend)
+### Firebase & function env (all via GitHub Secrets → CD)
 
-- [ ] Create a Firebase project and enable Auth (Email/Password), Firestore, Storage, and Functions.
-- [ ] From `backend/`: `firebase use <project-id>`, then deploy rules and indexes: `firebase deploy --only firestore:rules,firestore:indexes,storage`.
-- [ ] Add GitHub Secret **`SENTRY_DSN`** (Sentry DSN) — CD injects it into functions at deploy. Do not use Secret Manager for `SENTRY_DSN` (Cloud Run overlap error).
-- [ ] Optionally set other secrets via `firebase functions:secrets:set …` or Cloud Console (see `.env.production.example`).
-- [ ] Generate a CI token: `firebase login:ci` and add `FIREBASE_TOKEN` to GitHub Secrets.
-- [ ] Add Firebase web config to GitHub Secrets: `FIREBASE_PROJECT_ID`, `FIREBASE_API_KEY`, `FIREBASE_AUTH_DOMAIN`, `FIREBASE_STORAGE_BUCKET`, `FIREBASE_MESSAGING_SENDER_ID`, `FIREBASE_APP_ID` (for frontend build).
+- [ ] **`FIREBASE_TOKEN`**, **`FIREBASE_PROJECT_ID`**, web config secrets (API key, auth domain, storage bucket, messaging sender ID, app ID).
+- [ ] **`SENTRY_DSN`**; **`SMTP_PASS`**, **`SMTP_FROM_EMAIL`**, **`SUPER_ADMIN_EMAIL`**; optional **`SMTP_USER`**, **`SMTP_HOST`**, **`SMTP_PORT`**, **`SMTP_FROM_NAME`**.
+- [ ] Optional: **`GOOGLE_CALENDAR_CLIENT_EMAIL`**, **`GOOGLE_CALENDAR_PRIVATE_KEY`**, **`GOOGLE_CALENDAR_ID`**, **`ANTHROPIC_API_KEY`**.
+- [ ] Optional: **`VITE_RECAPTCHA_SITE_KEY`** (App Check), **`VITE_SENTRY_DSN`**.
 
-### Notifications
+### Operations
 
-- [ ] Add Resend (or SMTP) and alert email to GitHub Secrets: `SMTP_PASS`, `SMTP_FROM_EMAIL`, `SUPER_ADMIN_EMAIL`.
+- [ ] Enable **Firestore PITR**: `./scripts/enable-firestore-pitr.sh <gcp-project-id>` (or Console).
+- [ ] Key/token rotation cadence: **[docs/runbooks/token-and-key-rotation.md](docs/runbooks/token-and-key-rotation.md)**; optional OIDC example: `infra/terraform/github-oidc.tf.example`.
 
-Once the checklist is done, pushes to `master` run CI and then CD deploys frontend (S3 + CloudFront) and Firebase (Functions + rules).
+CD deploys **functions + Firestore rules + Firestore indexes + storage** and frontend to S3/CloudFront.
 
 ---
 
