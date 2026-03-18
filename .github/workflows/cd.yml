@@ -24,6 +24,8 @@ name: CD - Deploy to Production
 #   GOOGLE_CALENDAR_ID (optional)
 #   ANTHROPIC_API_KEY (optional — tutor recommendations)
 #   Optional frontend: VITE_SENTRY_DSN, VITE_RECAPTCHA_SITE_KEY (App Check)
+#   Deploy emails (Resend REST API): RESEND_API_KEY (re_... recommended). Optional RESEND_FROM_EMAIL
+#   (use onboarding@resend.dev until your domain is verified at resend.com).
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
@@ -46,9 +48,8 @@ jobs:
   deploy:
     name: "Deploy: S3 + CloudFront + Firebase"
     runs-on: ubuntu-latest
-    # Auto-trigger: only deploy when CI passed.
-    # Manual trigger (workflow_dispatch): always deploy — operator is responsible.
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    # Auto: deploy when triggering CI succeeded. Manual dispatch: always. Re-runs: workflow_run payload is often empty on "Re-run jobs" — run_attempt>1 fixes skipped redeploys.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' || github.run_attempt > 1 }}
     env:
       AWS_ACCESS_KEY_ID:            ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY:        ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -65,6 +66,8 @@ jobs:
       SMTP_PASS:                    ${{ secrets.SMTP_PASS }}
       SMTP_FROM_EMAIL:              ${{ secrets.SMTP_FROM_EMAIL }}
       SUPER_ADMIN_EMAIL:            ${{ secrets.SUPER_ADMIN_EMAIL }}
+      RESEND_API_KEY:               ${{ secrets.RESEND_API_KEY }}
+      RESEND_FROM_EMAIL:            ${{ secrets.RESEND_FROM_EMAIL }}
 
     steps:
       # ── Checkout the exact commit that passed CI ───────────────────────────
@@ -179,7 +182,6 @@ jobs:
       # ── Notify success ────────────────────────────────────────────────────
       - name: Send deployment success email
         if: success()
-        continue-on-error: true
         env:
           GH_SHA:     ${{ inputs.sha || github.event.workflow_run.head_sha || github.sha }}
           GH_TITLE:   ${{ github.event.workflow_run.display_title || 'manual dispatch' }}
@@ -187,38 +189,59 @@ jobs:
           CF_ID:      ${{ steps.invalidate.outputs.invalidation_id }}
         run: |
           SHORT_SHA="${GH_SHA:0:7}"
-          HTML="<div style='font-family:sans-serif;max-width:600px'><div style='background:#2563eb;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0'><h2 style='margin:0'>Production Deployment Successful</h2><p style='margin:8px 0 0;opacity:0.9'>schoolpeertutor.com is now live</p></div><div style='padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px'><table style='width:100%;border-collapse:collapse'><tr><td style='padding:8px 0;color:#6b7280;width:160px'>Commit</td><td style='padding:8px 0;font-family:monospace'>${SHORT_SHA}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>Message</td><td style='padding:8px 0'>${GH_TITLE}</td></tr><tr><td style='padding:8px 0;color:#6b7280'>CloudFront ID</td><td style='padding:8px 0'>${CF_ID}</td></tr></table><div style='margin-top:20px'><a href='https://schoolpeertutor.com' style='background:#2563eb;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block'>View Live Site</a></div></div></div>"
-          RESPONSE=$(jq -n \
-            --arg from    "SPT Admin <$SMTP_FROM_EMAIL>" \
-            --arg to      "$SUPER_ADMIN_EMAIL" \
+          API_KEY="${RESEND_API_KEY:-$SMTP_PASS}"
+          FROM="${RESEND_FROM_EMAIL:-$SMTP_FROM_EMAIL}"
+          if [ -z "$API_KEY" ] || [ -z "$FROM" ] || [ -z "$SUPER_ADMIN_EMAIL" ]; then
+            echo "::notice::Skipping deploy email (set RESEND_API_KEY, RESEND_FROM_EMAIL or SMTP_*, SUPER_ADMIN_EMAIL)"
+            exit 0
+          fi
+          PAYLOAD=$(jq -n \
+            --arg from "SPT Admin <$FROM>" \
+            --arg to "$SUPER_ADMIN_EMAIL" \
             --arg subject "Deployed to Production - $SHORT_SHA" \
-            --arg html    "$HTML" \
-          '{from:$from,to:[$to],subject:$subject,html:$html}' \
-          | curl -s --fail-with-body -X POST https://api.resend.com/emails \
-              -H "Authorization: Bearer $SMTP_PASS" \
-              -H "Content-Type: application/json" \
-              -d @-)
-          echo "$RESPONSE"
+            --arg sha "$SHORT_SHA" \
+            --arg title "$GH_TITLE" \
+            --arg cf "$CF_ID" \
+            --arg url "$GH_RUN_URL" \
+            '{
+              from: $from,
+              to: [$to],
+              subject: $subject,
+              html: ("<div style=\"font-family:sans-serif;max-width:600px\"><div style=\"background:#2563eb;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0\"><h2 style=\"margin:0\">Production deployment successful</h2><p style=\"margin:8px 0 0;opacity:0.9\">schoolpeertutor.com</p></div><div style=\"padding:24px;border:1px solid #e5e7eb\"><table><tr><td style=\"color:#6b7280\">Commit</td><td style=\"font-family:monospace\">" + $sha + "</td></tr><tr><td style=\"color:#6b7280\">Message</td><td>" + $title + "</td></tr><tr><td style=\"color:#6b7280\">CloudFront</td><td>" + $cf + "</td></tr></table><p><a href=\"https://schoolpeertutor.com\">Live site</a> · <a href=\"" + $url + "\">Workflow</a></p></div></div>")
+            }')
+          CODE=$(curl -sS -o /tmp/resend_cd.json -w "%{http_code}" -X POST https://api.resend.com/emails \
+            -H "Authorization: Bearer ${API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD")
+          cat /tmp/resend_cd.json
+          if [ "$CODE" = "200" ] || [ "$CODE" = "201" ]; then
+            echo "Resend OK (HTTP $CODE)"
+            exit 0
+          fi
+          echo "::warning::Resend HTTP $CODE — use GitHub secret RESEND_API_KEY (API key re_... from resend.com). From-address must be allowed: set RESEND_FROM_EMAIL=onboarding@resend.dev until your domain is verified."
+          exit 0
 
       # ── Notify failure ────────────────────────────────────────────────────
       - name: Send deployment failure email
         if: failure()
-        continue-on-error: true
         env:
           GH_SHA:     ${{ inputs.sha || github.event.workflow_run.head_sha || github.sha }}
           GH_TITLE:   ${{ github.event.workflow_run.display_title || 'manual dispatch' }}
           GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           SHORT_SHA="${GH_SHA:0:7}"
-          HTML="<div style='font-family:sans-serif;max-width:600px'><div style='background:#dc2626;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0'><h2 style='margin:0'>Production Deployment Failed</h2><p style='margin:8px 0 0;opacity:0.9'>CI passed but deploy failed - site is unchanged</p></div><div style='padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px'><p>Commit: ${SHORT_SHA}</p><p>Message: ${GH_TITLE}</p><a href='${GH_RUN_URL}' style='background:#dc2626;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block'>View Failure Logs</a></div></div>"
-          RESPONSE=$(jq -n \
-            --arg from    "SPT Admin <$SMTP_FROM_EMAIL>" \
-            --arg to      "$SUPER_ADMIN_EMAIL" \
-            --arg subject "DEPLOY FAILED - Production deployment error" \
-            --arg html    "$HTML" \
-          '{from:$from,to:[$to],subject:$subject,html:$html}' \
-          | curl -s --fail-with-body -X POST https://api.resend.com/emails \
-              -H "Authorization: Bearer $SMTP_PASS" \
-              -H "Content-Type: application/json" \
-              -d @-)
-          echo "$RESPONSE"
+          API_KEY="${RESEND_API_KEY:-$SMTP_PASS}"
+          FROM="${RESEND_FROM_EMAIL:-$SMTP_FROM_EMAIL}"
+          if [ -z "$API_KEY" ] || [ -z "$FROM" ] || [ -z "$SUPER_ADMIN_EMAIL" ]; then exit 0; fi
+          PAYLOAD=$(jq -n \
+            --arg from "SPT Admin <$FROM>" \
+            --arg to "$SUPER_ADMIN_EMAIL" \
+            --arg subject "DEPLOY FAILED - Production" \
+            --arg sha "$SHORT_SHA" \
+            --arg title "$GH_TITLE" \
+            --arg url "$GH_RUN_URL" \
+            '{from:$from,to:[$to],subject:$subject,html:("<div style=\"font-family:sans-serif\"><h2 style=\"color:#dc2626\">Deploy failed</h2><p>Commit: <code>" + $sha + "</code></p><p>" + $title + "</p><p><a href=\"" + $url + "\">Logs</a></p></div>")}')
+          CODE=$(curl -sS -o /tmp/resend_fail.json -w "%{http_code}" -X POST https://api.resend.com/emails \
+            -H "Authorization: Bearer ${API_KEY}" -H "Content-Type: application/json" -d "$PAYLOAD")
+          cat /tmp/resend_fail.json
+          exit 0
