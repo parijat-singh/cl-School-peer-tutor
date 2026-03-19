@@ -8,12 +8,13 @@ import { z }          from "zod";
 import { db, FieldValue, Timestamp } from "../lib/admin";
 import { sendBookingRequestEmail }   from "../lib/email";
 
-const schema = z.object({
+export const requestBookingSchema = z.object({
   tutorId:       z.string().min(1),
   slotId:        z.string().min(1),
   subject:       z.string().min(1),
   scheduledDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "scheduledDate must be YYYY-MM-DD"),
 });
+const schema = requestBookingSchema;
 
 export const requestBooking = functions.onCall(
   { enforceAppCheck: false, region: "us-central1" },

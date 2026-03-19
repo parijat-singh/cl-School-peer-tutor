@@ -128,3 +128,5 @@ cd infra/terraform && terraform apply
 ```
 
 Push to `master` → CI → CD deploys S3, CloudFront, Firebase (functions, rules, **indexes**, storage).
+
+**After go-live:** [docs/runbooks/security-ops-checklist.md](runbooks/security-ops-checklist.md) — App Check enforcement, PITR, rotation, S3 versioning, budget alerts, stale env cleanup.

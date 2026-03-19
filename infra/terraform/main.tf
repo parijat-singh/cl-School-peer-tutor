@@ -54,7 +54,22 @@ resource "aws_s3_bucket_versioning" "frontend" {
   bucket = aws_s3_bucket.frontend.id
 
   versioning_configuration {
-    status = "Disabled"
+    status = var.enable_s3_versioning ? "Enabled" : "Suspended"
+  }
+}
+
+# Expire old versions to control cost (only when versioning enabled)
+resource "aws_s3_bucket_lifecycle_configuration" "frontend" {
+  count  = var.enable_s3_versioning && var.s3_version_lifecycle_days > 0 ? 1 : 0
+  bucket = aws_s3_bucket.frontend.id
+
+  rule {
+    id     = "expire-noncurrent"
+    status = "Enabled"
+    filter {} # whole bucket
+    noncurrent_version_expiration {
+      noncurrent_days = var.s3_version_lifecycle_days
+    }
   }
 }
 

@@ -5,7 +5,11 @@ Minimal IaC for production frontend: **S3 bucket** (private) + **CloudFront** (O
 ## Prerequisites
 
 - [Terraform](https://www.terraform.io/downloads) >= 1.0
-- AWS CLI configured (e.g. `aws configure` with an admin or power-user account)
+- AWS CLI configured with an identity that can create S3, CloudFront, IAM, and (optional) WAF/ACM resources
+
+**If you use a dedicated Terraform user** (e.g. `peertutor-infra-provisioner`), its IAM policy must include:
+- **S3:** `s3:PutLifecycleConfiguration`, `s3:GetLifecycleConfiguration` on the frontend bucket (for versioning lifecycle).
+- **IAM:** `iam:TagUser`, `iam:UntagUser`, `iam:ListUserTags` on the deploy user (so Terraform can manage tags).
 
 ## Quick start
 
@@ -43,6 +47,10 @@ Add to GitHub → Settings → Secrets and variables → Actions:
 - **Own cert:** set `acm_certificate_arn`, `domain_name`, `enable_custom_domain = true`.
 - **Terraform + Route 53:** `create_acm_certificate = true`, `route53_zone_id = "Z..."`, `enable_custom_domain = true`.
 - **Terraform cert, external DNS:** `create_acm_certificate = true`, run `terraform output acm_certificate_validation_records`, add CNAMEs, then set `acm_certificate_arn` after ISSUED.
+
+## S3 versioning (default on)
+
+`enable_s3_versioning = true` (default) keeps object versions for rollback. `s3_version_lifecycle_days = 30` expires old versions to limit cost. Set `enable_s3_versioning = false` in tfvars to keep previous behavior.
 
 ## WAF (optional)
 

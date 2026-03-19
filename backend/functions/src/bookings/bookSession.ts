@@ -8,12 +8,13 @@ import { provisionMeetLink }         from "../lib/googleMeet";
 import { sendBookingConfirmation }   from "../lib/email";
 import { format }                    from "date-fns";
 
-const schema = z.object({
+export const bookSessionSchema = z.object({
   tutorId:       z.string().min(1),
   slotId:        z.string().min(1),
   subject:       z.string().min(1),
   scheduledDate: z.string().min(1),
 });
+const schema = bookSessionSchema;
 
 // Rate limit: 10 bookings per minute per user
 const bookingRateLimiter = new Map<string, { count: number; reset: number }>();

@@ -217,7 +217,7 @@ Firestore rules and indexes live under **`backend/firestore/`** — there are no
 
 ## Production checklist
 
-**Detailed steps:** **[docs/production-setup-guide.md](docs/production-setup-guide.md)** · Runbooks: **[token rotation](docs/runbooks/token-and-key-rotation.md)**, **[PITR](docs/runbooks/firestore-pitr-and-backups.md)**, **[App Check / WAF](docs/runbooks/app-check-and-waf.md)**
+**Detailed steps:** **[docs/production-setup-guide.md](docs/production-setup-guide.md)** · **Post-launch:** **[security & ops checklist](docs/runbooks/security-ops-checklist.md)** · Runbooks: [token rotation](docs/runbooks/token-and-key-rotation.md), [PITR](docs/runbooks/firestore-pitr-and-backups.md), [App Check / WAF](docs/runbooks/app-check-and-waf.md)
 
 ### AWS (frontend)
 

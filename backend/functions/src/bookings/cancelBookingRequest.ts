@@ -6,9 +6,10 @@ import * as functions from "firebase-functions/v2/https";
 import { z }          from "zod";
 import { db, FieldValue } from "../lib/admin";
 
-const schema = z.object({
+export const cancelBookingRequestSchema = z.object({
   requestId: z.string().min(1),
 });
+const schema = cancelBookingRequestSchema;
 
 export const cancelBookingRequest = functions.onCall(
   { enforceAppCheck: false, region: "us-central1" },

@@ -48,6 +48,18 @@ variable "enable_waf" {
   default     = false
 }
 
+variable "enable_s3_versioning" {
+  description = "Enable S3 versioning for frontend bucket (rollback / recovery); set lifecycle_days to expire old versions"
+  type        = bool
+  default     = true
+}
+
+variable "s3_version_lifecycle_days" {
+  description = "Expire noncurrent object versions after this many days (0 = keep forever; 30–90 typical)"
+  type        = number
+  default     = 30
+}
+
 variable "tags" {
   description = "Tags applied to all resources"
   type        = map(string)

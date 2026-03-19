@@ -18,11 +18,12 @@ import { provisionMeetLink }         from "../lib/googleMeet";
 import { sendBookingConfirmation, sendRequestRejectedEmail } from "../lib/email";
 import { format } from "date-fns";
 
-const schema = z.object({
+export const respondToBookingSchema = z.object({
   requestId:       z.string().min(1),
   action:          z.enum(["accept", "reject"]),
   rejectionReason: z.string().optional(),
 });
+const schema = respondToBookingSchema;
 
 export const respondToBooking = functions.onCall(
   { enforceAppCheck: false, region: "us-central1" },

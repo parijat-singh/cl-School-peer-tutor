@@ -12,6 +12,7 @@ node_modules/
 # Build outputs
 dist/
 build/
+**/coverage/
 .firebase/
 **/functions/lib/
 

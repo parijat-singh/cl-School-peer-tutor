@@ -34,3 +34,5 @@ After any change, trigger **CD** (or `workflow_dispatch`) so `write-functions-de
 | Firebase CI token           | 90 days or on hire/offboard |
 | AWS deploy keys             | 90 days             |
 | SMTP / third-party API keys | Per vendor policy   |
+
+**Security & ops checklist:** [security-ops-checklist.md](security-ops-checklist.md)
