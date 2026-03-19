@@ -174,8 +174,9 @@ jobs:
               sleep 2
             done
           '
+          # Functions emulator may return non-2xx at /, so check port-open instead of curl -f
           timeout 30 bash -c '
-            until curl -sf http://localhost:5001 > /dev/null 2>&1; do
+            until nc -z localhost 5001 > /dev/null 2>&1; do
               sleep 2
             done
           '
