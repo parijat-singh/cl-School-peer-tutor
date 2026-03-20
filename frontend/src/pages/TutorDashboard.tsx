@@ -4,7 +4,7 @@ import { useAuth } from "@/lib/auth-context";
 import { SchoolBanner } from "@/components/shared/SchoolBanner";
 import { CalendarGrid, type CalendarDot } from "@/components/shared/CalendarGrid";
 import {
-  subscribeTutorSlots, subscribeUserSessions,
+  subscribeTutorSlots, subscribeUserSessions, subscribeTutorRequests,
   addAvailabilitySlot, removeAvailabilitySlot,
   updateAvailabilitySlot, cancelRecurringDate, uncancelRecurringDate,
   getUserDoc,
@@ -13,11 +13,12 @@ import {
   Button, Input, Select, Textarea, Modal, Toast, Badge, StarRating, Divider,
 } from "@/components/shared/ui";
 import { doc, updateDoc, addDoc, collection, serverTimestamp } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { httpsCallable } from "firebase/functions";
+import { db, fns } from "@/lib/firebase";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import type { AvailabilitySlot, SessionDoc, GradeLevel } from "@/lib/types";
+import type { AvailabilitySlot, SessionDoc, GradeLevel, BookingRequest } from "@/lib/types";
 import { DAYS_OF_WEEK } from "@/lib/types";
 
 const GRADES: { value: GradeLevel; label: string }[] = [
@@ -31,7 +32,8 @@ const GRADES: { value: GradeLevel; label: string }[] = [
 ];
 import {
   PlusCircle, Trash2, Video, Clock, BookOpen, Star, Users, Calendar,
-  Repeat, CalendarDays, X as XIcon, Edit2, LayoutList,
+  Repeat, CalendarDays, X as XIcon, Edit2, LayoutList, Inbox,
+  CheckCircle, XCircle,
 } from "lucide-react";
 import { format } from "date-fns";
 
@@ -112,6 +114,8 @@ export default function TutorDashboard() {
   const { currentUser } = useAuth();
   const [slots, setSlots]       = useState<AvailabilitySlot[]>([]);
   const [sessions, setSessions] = useState<SessionDoc[]>([]);
+  const [requests, setRequests] = useState<BookingRequest[]>([]);
+  const [respondingId, setRespondingId] = useState<string | null>(null);
   const [toast, setToast]       = useState<{ msg: string; type: "success"|"error" } | null>(null);
   const [slotModal, setSlotModal]       = useState(false);
   const [profileModal, setProfileModal] = useState(false);
@@ -150,7 +154,8 @@ export default function TutorDashboard() {
     if (!currentUser) return;
     const unsub1 = subscribeTutorSlots(currentUser.uid, setSlots);
     const unsub2 = subscribeUserSessions(currentUser.uid, "tutor", setSessions);
-    return () => { unsub1(); unsub2(); };
+    const unsub3 = subscribeTutorRequests(currentUser.uid, setRequests);
+    return () => { unsub1(); unsub2(); unsub3(); };
   }, [currentUser]);
 
   const handleAddSlot = slotForm.handleSubmit(async (data) => {
@@ -211,6 +216,32 @@ export default function TutorDashboard() {
       setToast({ msg: "Slot updated", type: "success" });
     } catch {
       setToast({ msg: "Failed to update slot", type: "error" });
+    }
+  };
+
+  const handleAcceptRequest = async (requestId: string) => {
+    setRespondingId(requestId);
+    try {
+      const fn = httpsCallable<unknown, { sessionId: string; meetLink: string | null; meetLinkStatus: string }>(fns, "respondToBooking");
+      await fn({ requestId, action: "accept" });
+      setToast({ msg: "Request accepted — session created!", type: "success" });
+    } catch (err: unknown) {
+      setToast({ msg: (err as { message?: string })?.message ?? "Failed to accept", type: "error" });
+    } finally {
+      setRespondingId(null);
+    }
+  };
+
+  const handleRejectRequest = async (requestId: string) => {
+    setRespondingId(requestId);
+    try {
+      const fn = httpsCallable<unknown, { success: boolean }>(fns, "respondToBooking");
+      await fn({ requestId, action: "reject" });
+      setToast({ msg: "Request declined", type: "success" });
+    } catch (err: unknown) {
+      setToast({ msg: (err as { message?: string })?.message ?? "Failed to reject", type: "error" });
+    } finally {
+      setRespondingId(null);
     }
   };
 
@@ -422,9 +453,10 @@ export default function TutorDashboard() {
       </div>
 
       {/* Stats row */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
         {[
-          { icon: Calendar, label: "Upcoming",    val: upcoming.length,  color: "text-brand-600" },
+          { icon: Inbox,    label: "Requests",    val: requests.length,  color: "text-brand-600" },
+          { icon: Calendar, label: "Upcoming",    val: upcoming.length,  color: "text-blue-600" },
           { icon: Users,    label: "Completed",   val: completed.length, color: "text-green-600" },
           { icon: Clock,    label: "Open Slots",  val: openSlots.length, color: "text-amber-600" },
           { icon: Star,     label: "Avg Rating",  val: avgRating,        color: "text-yellow-500" },
@@ -604,7 +636,74 @@ export default function TutorDashboard() {
       )}
 
       {/* ── List view ── */}
-      {view === "list" && <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {view === "list" && <div className="flex flex-col gap-6">
+
+        {/* ── Pending Requests ── */}
+        <div className="bg-white rounded-lg border border-gray-200 p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <h2 className="font-display text-xl text-gray-900">Booking Requests</h2>
+            {requests.length > 0 && (
+              <span className="w-6 h-6 rounded-full bg-brand-500 text-white text-xs flex items-center justify-center font-semibold">
+                {requests.length}
+              </span>
+            )}
+          </div>
+
+          {requests.length === 0 ? (
+            <div className="text-center py-8 text-gray-400">
+              <Inbox className="w-8 h-8 mx-auto mb-2 opacity-40" />
+              <p className="text-sm">No pending requests.</p>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {requests.map((req) => {
+                const isResponding = respondingId === req.id;
+                return (
+                  <div key={req.id} className="border border-gray-100 rounded-lg p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <p className="font-medium text-gray-900 text-sm">{req.tuteeName}</p>
+                        <Badge color="blue">{req.subject}</Badge>
+                      </div>
+                      <div className="flex items-center gap-3 text-xs text-gray-500">
+                        <span className="flex items-center gap-1">
+                          <Calendar className="w-3 h-3" />
+                          {format(new Date(req.scheduledDate + "T12:00:00"), "EEE, MMM d, yyyy")}
+                        </span>
+                        <span>{req.startTime} – {req.endTime}</span>
+                        <span>{req.duration} min</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        loading={isResponding}
+                        disabled={!!respondingId}
+                        onClick={() => handleRejectRequest(req.id)}
+                        className="text-red-600 border-red-200 hover:bg-red-50"
+                      >
+                        {!isResponding && <XCircle className="w-3.5 h-3.5" />}
+                        Decline
+                      </Button>
+                      <Button
+                        size="sm"
+                        loading={isResponding}
+                        disabled={!!respondingId}
+                        onClick={() => handleAcceptRequest(req.id)}
+                      >
+                        {!isResponding && <CheckCircle className="w-3.5 h-3.5" />}
+                        Accept
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* ── Availability ── */}
         <div className="bg-white rounded-lg border border-gray-200 p-6">
           <div className="flex items-center justify-between mb-4">
@@ -782,6 +881,7 @@ export default function TutorDashboard() {
             </div>
           )}
         </div>
+      </div>
       </div>}
 
       {/* ── Completed Sessions ── */}

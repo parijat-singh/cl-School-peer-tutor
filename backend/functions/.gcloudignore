@@ -1,0 +1,7 @@
+# Do not upload .env — CD writes it locally; Firebase CLI applies vars at deploy (not in zip).
+.env
+.env.*
+!.env.example
+
+# Dependencies and build artifacts (Firebase deploys from lib/ or source per firebase.json)
+node_modules/

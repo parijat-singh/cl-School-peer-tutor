@@ -1,0 +1,247 @@
+name: CD - Deploy to Production
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Runs on GitHub-hosted runners — no self-hosted runner required.
+# All credentials are stored as GitHub Secrets (Settings → Secrets → Actions).
+#
+# Triggers automatically after the CI workflow passes on master.
+# 1. Builds the React frontend with production Firebase config
+# 2. Syncs built assets to S3 (hashed files: long cache; index.html: no-cache)
+# 3. Invalidates CloudFront so changes go live within ~60 seconds
+# 4. Deploys Firebase Functions + Firestore rules + Storage rules
+# 5. Sends a success or failure email via Resend
+#
+# Required GitHub Secrets:
+#   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION
+#   S3_BUCKET, CLOUDFRONT_DISTRIBUTION_ID
+#   FIREBASE_PROJECT_ID, FIREBASE_TOKEN  (generate: firebase login:ci)
+#   FIREBASE_API_KEY, FIREBASE_AUTH_DOMAIN, FIREBASE_STORAGE_BUCKET,
+#   FIREBASE_MESSAGING_SENDER_ID, FIREBASE_APP_ID
+#   SENTRY_DSN (backend Sentry)
+#   SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM_EMAIL, SMTP_FROM_NAME
+#   SUPER_ADMIN_EMAIL
+#   GOOGLE_CALENDAR_CLIENT_EMAIL, GOOGLE_CALENDAR_PRIVATE_KEY (PEM, multiline OK in GH)
+#   GOOGLE_CALENDAR_ID (optional)
+#   ANTHROPIC_API_KEY (optional — tutor recommendations)
+#   Optional frontend: VITE_SENTRY_DSN, VITE_RECAPTCHA_SITE_KEY (App Check)
+#   Deploy emails (Resend REST API): RESEND_API_KEY (re_... recommended). Optional RESEND_FROM_EMAIL
+#   (use onboarding@resend.dev until your domain is verified at resend.com).
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [master]
+  # Manual trigger — use when you want to redeploy without a new commit.
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Git SHA to deploy (leave blank for latest master)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: "Deploy: S3 + CloudFront + Firebase"
+    runs-on: ubuntu-latest
+    # Auto: deploy when triggering CI succeeded. Manual dispatch: always. Re-runs: workflow_run payload is often empty on "Re-run jobs" — run_attempt>1 fixes skipped redeploys.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' || github.run_attempt > 1 }}
+    env:
+      AWS_ACCESS_KEY_ID:            ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY:        ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION:           ${{ secrets.AWS_REGION }}
+      S3_BUCKET:                    ${{ secrets.S3_BUCKET }}
+      CLOUDFRONT_DISTRIBUTION_ID:   ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}
+      FIREBASE_PROJECT_ID:          ${{ secrets.FIREBASE_PROJECT_ID }}
+      FIREBASE_TOKEN:               ${{ secrets.FIREBASE_TOKEN }}
+      FIREBASE_API_KEY:             ${{ secrets.FIREBASE_API_KEY }}
+      FIREBASE_AUTH_DOMAIN:         ${{ secrets.FIREBASE_AUTH_DOMAIN }}
+      FIREBASE_STORAGE_BUCKET:      ${{ secrets.FIREBASE_STORAGE_BUCKET }}
+      FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FIREBASE_MESSAGING_SENDER_ID }}
+      FIREBASE_APP_ID:              ${{ secrets.FIREBASE_APP_ID }}
+      SMTP_PASS:                    ${{ secrets.SMTP_PASS }}
+      SMTP_FROM_EMAIL:              ${{ secrets.SMTP_FROM_EMAIL }}
+      SUPER_ADMIN_EMAIL:            ${{ secrets.SUPER_ADMIN_EMAIL }}
+      RESEND_API_KEY:               ${{ secrets.RESEND_API_KEY }}
+      RESEND_FROM_EMAIL:            ${{ secrets.RESEND_FROM_EMAIL }}
+
+    steps:
+      # ── Checkout the exact commit that passed CI ───────────────────────────
+      - uses: actions/checkout@v4
+        with:
+          # workflow_run: use the SHA that passed CI.
+          # workflow_dispatch: use the provided SHA or fall back to HEAD.
+          ref: ${{ inputs.sha || github.event.workflow_run.head_sha || github.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            backend/functions/package-lock.json
+
+      # ── Build frontend ─────────────────────────────────────────────────────
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --prefer-offline
+
+      - name: Build frontend
+        working-directory: frontend
+        env:
+          VITE_FIREBASE_API_KEY:             ${{ env.FIREBASE_API_KEY }}
+          VITE_FIREBASE_AUTH_DOMAIN:         ${{ env.FIREBASE_AUTH_DOMAIN }}
+          VITE_FIREBASE_PROJECT_ID:          ${{ env.FIREBASE_PROJECT_ID }}
+          VITE_FIREBASE_STORAGE_BUCKET:      ${{ env.FIREBASE_STORAGE_BUCKET }}
+          VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ env.FIREBASE_MESSAGING_SENDER_ID }}
+          VITE_FIREBASE_APP_ID:              ${{ env.FIREBASE_APP_ID }}
+          VITE_USE_EMULATORS:                "false"
+          VITE_SENTRY_DSN:                   ${{ secrets.VITE_SENTRY_DSN }}
+          VITE_RECAPTCHA_SITE_KEY:           ${{ secrets.VITE_RECAPTCHA_SITE_KEY }}
+          VITE_GIT_SHA:                      ${{ inputs.sha || github.event.workflow_run.head_sha || github.sha }}
+        run: npm run build
+
+      # ── Deploy to S3 ──────────────────────────────────────────────────────
+      - name: Sync hashed assets to S3 (long-lived cache)
+        run: |
+          aws s3 sync frontend/dist/ "s3://$S3_BUCKET/" \
+            --delete \
+            --cache-control "max-age=31536000,immutable" \
+            --exclude "index.html" \
+            --exclude "*.map"
+
+      - name: Upload index.html (no-cache)
+        run: |
+          aws s3 cp frontend/dist/index.html "s3://$S3_BUCKET/index.html" \
+            --cache-control "no-cache,no-store,must-revalidate" \
+            --content-type "text/html"
+
+      # ── Invalidate CloudFront ─────────────────────────────────────────────
+      - name: Invalidate CloudFront cache
+        id: invalidate
+        run: |
+          CF_ID=$(aws cloudfront create-invalidation \
+            --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" \
+            --paths "/*" \
+            --query "Invalidation.Id" \
+            --output text)
+          echo "invalidation_id=$CF_ID" >> "$GITHUB_OUTPUT"
+          echo "CloudFront invalidation: $CF_ID"
+
+      # ── Deploy Firebase Functions + rules ────────────────────────────────
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools@13
+
+      - name: Install Cloud Functions dependencies
+        working-directory: backend/functions
+        run: npm ci --prefer-offline
+
+      - name: Build Cloud Functions
+        working-directory: backend/functions
+        run: npm run build
+
+      - name: Verify functions build output
+        run: |
+          if [ ! -f "backend/functions/lib/index.js" ]; then
+            echo "::error::Functions build output not found at backend/functions/lib/index.js"
+            exit 1
+          fi
+          echo "Functions build output verified"
+
+      # All function runtime config from GitHub Secrets → .env (see scripts/write-functions-deploy-env.mjs)
+      - name: Write Cloud Functions production .env
+        env:
+          SENTRY_DSN:                      ${{ secrets.SENTRY_DSN }}
+          SENTRY_RELEASE:                  ${{ inputs.sha || github.event.workflow_run.head_sha || github.sha }}
+          SMTP_HOST:                       ${{ secrets.SMTP_HOST }}
+          SMTP_PORT:                       ${{ secrets.SMTP_PORT }}
+          SMTP_USER:                       ${{ secrets.SMTP_USER }}
+          SMTP_PASS:                       ${{ secrets.SMTP_PASS }}
+          SMTP_FROM_EMAIL:                 ${{ secrets.SMTP_FROM_EMAIL }}
+          SMTP_FROM_NAME:                  ${{ secrets.SMTP_FROM_NAME }}
+          SUPER_ADMIN_EMAIL:               ${{ secrets.SUPER_ADMIN_EMAIL }}
+          GOOGLE_CALENDAR_CLIENT_EMAIL:    ${{ secrets.GOOGLE_CALENDAR_CLIENT_EMAIL }}
+          GOOGLE_CALENDAR_PRIVATE_KEY:     ${{ secrets.GOOGLE_CALENDAR_PRIVATE_KEY }}
+          GOOGLE_CALENDAR_ID:              ${{ secrets.GOOGLE_CALENDAR_ID }}
+          ANTHROPIC_API_KEY:               ${{ secrets.ANTHROPIC_API_KEY }}
+        run: node scripts/write-functions-deploy-env.mjs
+
+      - name: Deploy to Firebase
+        working-directory: backend
+        run: |
+          FUNCTIONS_DISCOVERY_TIMEOUT=120 firebase deploy \
+            --only "functions,firestore:rules,firestore:indexes,storage" \
+            --project "$FIREBASE_PROJECT_ID" \
+            --token "$FIREBASE_TOKEN" \
+            --non-interactive
+
+      # ── Notify success ────────────────────────────────────────────────────
+      - name: Send deployment success email
+        if: success()
+        env:
+          GH_SHA:     ${{ inputs.sha || github.event.workflow_run.head_sha || github.sha }}
+          GH_TITLE:   ${{ github.event.workflow_run.display_title || 'manual dispatch' }}
+          GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          CF_ID:      ${{ steps.invalidate.outputs.invalidation_id }}
+        run: |
+          SHORT_SHA="${GH_SHA:0:7}"
+          API_KEY="${RESEND_API_KEY:-$SMTP_PASS}"
+          FROM="${RESEND_FROM_EMAIL:-$SMTP_FROM_EMAIL}"
+          if [ -z "$API_KEY" ] || [ -z "$FROM" ] || [ -z "$SUPER_ADMIN_EMAIL" ]; then
+            echo "::notice::Skipping deploy email (set RESEND_API_KEY, RESEND_FROM_EMAIL or SMTP_*, SUPER_ADMIN_EMAIL)"
+            exit 0
+          fi
+          PAYLOAD=$(jq -n \
+            --arg from "SPT Admin <$FROM>" \
+            --arg to "$SUPER_ADMIN_EMAIL" \
+            --arg subject "Deployed to Production - $SHORT_SHA" \
+            --arg sha "$SHORT_SHA" \
+            --arg title "$GH_TITLE" \
+            --arg cf "$CF_ID" \
+            --arg url "$GH_RUN_URL" \
+            '{
+              from: $from,
+              to: [$to],
+              subject: $subject,
+              html: ("<div style=\"font-family:sans-serif;max-width:600px\"><div style=\"background:#2563eb;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0\"><h2 style=\"margin:0\">Production deployment successful</h2><p style=\"margin:8px 0 0;opacity:0.9\">schoolpeertutor.com</p></div><div style=\"padding:24px;border:1px solid #e5e7eb\"><table><tr><td style=\"color:#6b7280\">Commit</td><td style=\"font-family:monospace\">" + $sha + "</td></tr><tr><td style=\"color:#6b7280\">Message</td><td>" + $title + "</td></tr><tr><td style=\"color:#6b7280\">CloudFront</td><td>" + $cf + "</td></tr></table><p><a href=\"https://schoolpeertutor.com\">Live site</a> · <a href=\"" + $url + "\">Workflow</a></p></div></div>")
+            }')
+          CODE=$(curl -sS -o /tmp/resend_cd.json -w "%{http_code}" -X POST https://api.resend.com/emails \
+            -H "Authorization: Bearer ${API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD")
+          cat /tmp/resend_cd.json
+          if [ "$CODE" = "200" ] || [ "$CODE" = "201" ]; then
+            echo "Resend OK (HTTP $CODE)"
+            exit 0
+          fi
+          echo "::warning::Resend HTTP $CODE — use GitHub secret RESEND_API_KEY (API key re_... from resend.com). From-address must be allowed: set RESEND_FROM_EMAIL=onboarding@resend.dev until your domain is verified."
+          exit 0
+
+      # ── Notify failure ────────────────────────────────────────────────────
+      - name: Send deployment failure email
+        if: failure()
+        env:
+          GH_SHA:     ${{ inputs.sha || github.event.workflow_run.head_sha || github.sha }}
+          GH_TITLE:   ${{ github.event.workflow_run.display_title || 'manual dispatch' }}
+          GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          SHORT_SHA="${GH_SHA:0:7}"
+          API_KEY="${RESEND_API_KEY:-$SMTP_PASS}"
+          FROM="${RESEND_FROM_EMAIL:-$SMTP_FROM_EMAIL}"
+          if [ -z "$API_KEY" ] || [ -z "$FROM" ] || [ -z "$SUPER_ADMIN_EMAIL" ]; then exit 0; fi
+          PAYLOAD=$(jq -n \
+            --arg from "SPT Admin <$FROM>" \
+            --arg to "$SUPER_ADMIN_EMAIL" \
+            --arg subject "DEPLOY FAILED - Production" \
+            --arg sha "$SHORT_SHA" \
+            --arg title "$GH_TITLE" \
+            --arg url "$GH_RUN_URL" \
+            '{from:$from,to:[$to],subject:$subject,html:("<div style=\"font-family:sans-serif\"><h2 style=\"color:#dc2626\">Deploy failed</h2><p>Commit: <code>" + $sha + "</code></p><p>" + $title + "</p><p><a href=\"" + $url + "\">Logs</a></p></div>")}')
+          CODE=$(curl -sS -o /tmp/resend_fail.json -w "%{http_code}" -X POST https://api.resend.com/emails \
+            -H "Authorization: Bearer ${API_KEY}" -H "Content-Type: application/json" -d "$PAYLOAD")
+          cat /tmp/resend_fail.json
+          exit 0

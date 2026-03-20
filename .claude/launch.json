@@ -4,7 +4,7 @@
     {
       "name": "frontend",
       "runtimeExecutable": "node",
-      "runtimeArgs": ["-e", "const http=require('http');const port=process.env.PORT||3999;http.createServer((req,res)=>{const opts={hostname:'localhost',port:5180,path:req.url,method:req.method,headers:{...req.headers,host:'localhost:5180'}};const p=http.request(opts,pr=>{const h={...pr.headers};h['access-control-allow-origin']='*';res.writeHead(pr.statusCode,h);pr.pipe(res)});req.pipe(p);p.on('error',()=>{res.writeHead(502);res.end()})}).listen(port,()=>console.log('Proxy on '+port))"],
+      "runtimeArgs": ["-e", "const http=require('http');const port=process.env.PORT||3999;http.createServer((req,res)=>{const opts={hostname:'localhost',port:5176,path:req.url,method:req.method,headers:{...req.headers,host:'localhost:5176'}};const p=http.request(opts,pr=>{const h={...pr.headers};h['access-control-allow-origin']='*';res.writeHead(pr.statusCode,h);pr.pipe(res)});req.pipe(p);p.on('error',()=>{res.writeHead(502);res.end()})}).listen(port,()=>console.log('Proxy on '+port))"],
       "port": 3999
     }
   ]

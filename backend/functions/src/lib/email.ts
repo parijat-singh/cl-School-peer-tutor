@@ -352,6 +352,115 @@ export async function sendOtpEmail(params: {
   });
 }
 
+// ── Booking request notification (tutor) ────────────────────────
+
+export async function sendBookingRequestEmail(params: {
+  tutorEmail:    string;
+  tutorName:     string;
+  tuteeName:     string;
+  tuteeEmail:    string;
+  subject:       string;
+  scheduledDate: string;  // "YYYY-MM-DD"
+  day:           string;
+  startTime:     string;
+  endTime:       string;
+  duration:      number;
+  requestId:     string;
+}) {
+  const dateLabel = new Date(params.scheduledDate + "T12:00:00.000Z").toLocaleDateString("en-US", {
+    weekday: "long", year: "numeric", month: "long", day: "numeric",
+  });
+
+  const dashboardUrl = "https://schoolpeertutor.com/tutor-dashboard";
+
+  const html = layout("New Booking Request — School PeerTutor",
+    cardHeader("📬", "New Booking Request", `${params.tuteeName} wants to book a session with you`) +
+    cardBody(`
+      <p style="margin:0 0 24px;font-size:15px;color:${TEXT_PRIMARY};line-height:1.6;">
+        Hi <strong>${params.tutorName}</strong>,<br/>
+        You have a new tutoring session request. Review it and accept or decline from your dashboard.
+      </p>
+      <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border-radius:10px;padding:16px 20px;margin-bottom:24px;">
+        <tbody>
+          ${detailRow("Student",  params.tuteeName)}
+          ${detailRow("Subject",  params.subject)}
+          ${detailRow("Date",     dateLabel)}
+          ${detailRow("Time",     `${params.startTime} – ${params.endTime}`)}
+          ${detailRow("Duration", `${params.duration} min`)}
+        </tbody>
+      </table>
+      ${ctaButton("Review Request", dashboardUrl)}
+      ${divider()}
+      <p style="margin:0;font-size:13px;color:${TEXT_MUTED};line-height:1.6;">
+        Please respond promptly — students are waiting for your decision.
+        If you don't respond within 48 hours the request may expire.
+      </p>
+    `)
+  );
+
+  await transport.sendMail({
+    from: FROM, to: params.tutorEmail,
+    subject: `Booking Request: ${params.subject} from ${params.tuteeName}`,
+    html,
+  });
+}
+
+// ── Request rejected / slot taken (tutee) ─────────────────────────
+
+export async function sendRequestRejectedEmail(params: {
+  tuteeEmail:    string;
+  tuteeName:     string;
+  tutorName:     string;
+  subject:       string;
+  scheduledDate: string;  // "YYYY-MM-DD"
+  day:           string;
+  startTime:     string;
+  endTime:       string;
+  reason:        "slot_taken" | "tutor_declined" | string;
+}) {
+  const dateLabel = new Date(params.scheduledDate + "T12:00:00.000Z").toLocaleDateString("en-US", {
+    weekday: "long", year: "numeric", month: "long", day: "numeric",
+  });
+
+  const isSlotTaken  = params.reason === "slot_taken";
+  const reasonText   = isSlotTaken
+    ? "This slot was accepted by another student before your request could be reviewed."
+    : "Your tutor has declined this request.";
+  const headerTitle  = isSlotTaken ? "Slot No Longer Available" : "Request Declined";
+  const headerSub    = isSlotTaken
+    ? `Another student was accepted for this ${params.subject} slot`
+    : `${params.tutorName} has declined your booking request`;
+
+  const html = layout("Session Request Update — School PeerTutor",
+    cardHeader(isSlotTaken ? "🔒" : "❌", headerTitle, headerSub) +
+    cardBody(`
+      <p style="margin:0 0 24px;font-size:15px;color:${TEXT_PRIMARY};line-height:1.6;">
+        Hi <strong>${params.tuteeName}</strong>,<br/>
+        ${reasonText}
+      </p>
+      <table width="100%" cellpadding="0" cellspacing="0" style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:16px 20px;margin-bottom:24px;">
+        <tbody>
+          ${detailRow("Subject", params.subject)}
+          ${detailRow("Date",    dateLabel)}
+          ${detailRow("Time",    `${params.startTime} – ${params.endTime}`)}
+          ${detailRow("Tutor",   params.tutorName)}
+        </tbody>
+      </table>
+      ${ctaButton("Find Another Session", "https://schoolpeertutor.com/find-tutor")}
+      ${divider()}
+      <p style="margin:0;font-size:13px;color:${TEXT_MUTED};line-height:1.6;">
+        Don't worry — there are plenty of other available slots. Browse tutors and request a new session anytime.
+      </p>
+    `)
+  );
+
+  await transport.sendMail({
+    from: FROM, to: params.tuteeEmail,
+    subject: `Update on your ${params.subject} session request`,
+    html,
+  });
+}
+
 // ── ICS calendar invite ───────────────────────────────────────────
 
 function generateIcs(params: {

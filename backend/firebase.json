@@ -5,7 +5,7 @@
   },
   "functions": {
     "source": "functions",
-    "runtime": "nodejs20",
+    "runtime": "nodejs22",
     "ignore": ["node_modules", ".git", "firebase-debug.log"]
   },
   "storage": {
@@ -22,7 +22,7 @@
     },
     "firestore": {
       "host": "0.0.0.0",
-      "port": 8080
+      "port": 8090
     },
     "storage": {
       "host": "0.0.0.0",

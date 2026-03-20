@@ -8,9 +8,10 @@
 set -euo pipefail
 
 PROJECT_ID="peertutor-dev"
-FIRESTORE_URL="http://localhost:8080/v1/projects/${PROJECT_ID}/databases/(default)/documents"
+FIRESTORE_URL="http://localhost:8090/v1/projects/${PROJECT_ID}/databases/(default)/documents"
 AUTH_ADMIN_URL="http://localhost:9099/identitytoolkit.googleapis.com/v1/projects/${PROJECT_ID}"
 AUTH_SIGNIN_URL="http://localhost:9099/identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=fake-api-key"
+FUNCTIONS_URL="http://localhost:5001/${PROJECT_ID}/us-central1"
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -26,7 +27,7 @@ NC='\033[0m' # No Color
 
 if command -v jq &>/dev/null; then
   extract_string() { echo "$1" | jq -r ".fields.$2.stringValue // empty" 2>/dev/null; }
-  extract_bool()   { echo "$1" | jq -r ".fields.$2.booleanValue // empty" 2>/dev/null; }
+  extract_bool()   { echo "$1" | jq -r "if (.fields.$2.booleanValue == null) then empty else (.fields.$2.booleanValue | tostring) end" 2>/dev/null; }
   extract_int()    { echo "$1" | jq -r ".fields.$2.integerValue // empty" 2>/dev/null; }
   extract_double() { echo "$1" | jq -r ".fields.$2.doubleValue // empty" 2>/dev/null; }
 else
@@ -166,7 +167,7 @@ lookup_auth_user() {
 
 clear_emulator() {
   # Clear all Firestore data
-  curl -s --globoff -X DELETE "http://localhost:8080/emulator/v1/projects/${PROJECT_ID}/databases/(default)/documents" > /dev/null 2>&1
+  curl -s --globoff -X DELETE "http://localhost:8090/emulator/v1/projects/${PROJECT_ID}/databases/(default)/documents" > /dev/null 2>&1
   # Clear all Auth users
   curl -s --globoff -X DELETE "http://localhost:9099/emulator/v1/projects/${PROJECT_ID}/accounts" > /dev/null 2>&1
 }
@@ -181,7 +182,7 @@ echo -e "${CYAN}║   PeerTutor E2E Test Suite                   ║${NC}"
 echo -e "${CYAN}╚══════════════════════════════════════════════╝${NC}"
 echo ""
 
-if ! curl -s --connect-timeout 3 "http://localhost:8080/" > /dev/null 2>&1; then
+if ! curl -s --connect-timeout 3 "http://localhost:8090/" > /dev/null 2>&1; then
   echo -e "${YELLOW}[SKIP] Firebase emulators not running. Start with: docker-compose up -d firebase-emulators${NC}"
   exit 0
 fi
@@ -809,6 +810,242 @@ fi
 # Clean up
 delete_doc "schools/approval-test.edu"
 delete_doc "users/user-approval-admin"
+echo ""
+
+# ══════════════════════════════════════════════════════════════════
+# Cloud Function helpers (T17–T24)
+# ══════════════════════════════════════════════════════════════════
+
+# Sign in a user via the Auth emulator; returns the idToken
+signin_user() {
+  local email="$1" password="$2"
+  curl -s -X POST "${AUTH_SIGNIN_URL}" \
+    -H "Content-Type: application/json" \
+    -d "{\"email\":\"${email}\",\"password\":\"${password}\",\"returnSecureToken\":true}" 2>/dev/null \
+  | python -c "import json,sys; d=json.load(sys.stdin); print(d.get('idToken',''),end='')" 2>/dev/null
+}
+
+# POST to a Cloud Function callable endpoint
+call_function() {
+  local fn_name="$1" data="$2" id_token="$3"
+  curl -s -X POST "${FUNCTIONS_URL}/${fn_name}" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer ${id_token}" \
+    -d "{\"data\":${data}}" 2>/dev/null
+}
+
+# Extract a field from a Cloud Function's {"result": {...}} response
+fn_result() {
+  local field="$2"
+  echo "$1" | python -c "import json,sys; d=json.load(sys.stdin); v=d.get('result',{}).get('${field}',''); print(str(v).lower() if isinstance(v,bool) else str(v),end='')" 2>/dev/null
+}
+
+# Extract the error message from a Cloud Function's {"error": {...}} response
+fn_error() {
+  echo "$1" | python -c "import json,sys; d=json.load(sys.stdin); print(d.get('error',{}).get('message',''),end='')" 2>/dev/null
+}
+
+# Assert that haystack contains needle (case-insensitive ERE)
+assert_contains() {
+  local haystack="$1" needle="$2" label="$3"
+  if echo "$haystack" | grep -qiE "$needle"; then
+    pass "$label"
+  else
+    fail "$label" "(contains '${needle}')" "${haystack:0:100}"
+  fi
+}
+
+# Dynamic dates: next Monday / Tuesday / Wednesday from today
+NEXT_MONDAY=$(python  -c "from datetime import date,timedelta; t=date.today(); d=(0-t.weekday())%7; d=d if d else 7; print((t+timedelta(d)).strftime('%Y-%m-%d'))")
+NEXT_TUESDAY=$(python -c "from datetime import date,timedelta; t=date.today(); d=(1-t.weekday())%7; d=d if d else 7; print((t+timedelta(d)).strftime('%Y-%m-%d'))")
+NEXT_WEDNESDAY=$(python -c "from datetime import date,timedelta; t=date.today(); d=(2-t.weekday())%7; d=d if d else 7; print((t+timedelta(d)).strftime('%Y-%m-%d'))")
+
+# ══════════════════════════════════════════════════════════════════
+# TEST 17: Tutee requests a slot — happy path
+# ══════════════════════════════════════════════════════════════════
+echo -e "${CYAN}[T17] Tutee requests a slot — happy path${NC}"
+
+TUTEE1_TOKEN=$(signin_user "tutee1@lincoln.edu" "Test1234!")
+assert_not_empty "$TUTEE1_TOKEN" "tutee1 signed in for booking request tests"
+
+RESP=$(call_function "requestBooking" \
+  "{\"tutorId\":\"user-tutor-001\",\"slotId\":\"slot-001\",\"scheduledDate\":\"${NEXT_MONDAY}\",\"subject\":\"Algebra\"}" \
+  "$TUTEE1_TOKEN")
+BR1_ID=$(fn_result "$RESP" requestId)
+assert_not_empty "$BR1_ID" "requestBooking returns requestId"
+
+BR1=$(get_doc "bookingRequests/${BR1_ID}")
+assert_equals "$(extract_string "$BR1" "status")"        "pending"          "BookingRequest status is pending"
+assert_equals "$(extract_string "$BR1" "tuteeId")"       "user-tutee-001"   "BookingRequest tuteeId correct"
+assert_equals "$(extract_string "$BR1" "tutorId")"       "user-tutor-001"   "BookingRequest tutorId correct"
+assert_equals "$(extract_string "$BR1" "slotId")"        "slot-001"         "BookingRequest slotId correct"
+assert_equals "$(extract_string "$BR1" "scheduledDate")" "${NEXT_MONDAY}"   "BookingRequest scheduledDate correct"
+echo ""
+
+# ══════════════════════════════════════════════════════════════════
+# TEST 18: Duplicate booking request blocked
+# ══════════════════════════════════════════════════════════════════
+echo -e "${CYAN}[T18] Duplicate booking request blocked${NC}"
+
+RESP=$(call_function "requestBooking" \
+  "{\"tutorId\":\"user-tutor-001\",\"slotId\":\"slot-001\",\"scheduledDate\":\"${NEXT_MONDAY}\",\"subject\":\"Algebra\"}" \
+  "$TUTEE1_TOKEN")
+DUP_ERR=$(fn_error "$RESP")
+assert_contains "$DUP_ERR" "already|pending|exist|duplicate" "Duplicate request returns an error"
+echo ""
+
+# ══════════════════════════════════════════════════════════════════
+# TEST 19: Tutor accepts request → session created, slot booked
+# ══════════════════════════════════════════════════════════════════
+echo -e "${CYAN}[T19] Tutor accepts booking request${NC}"
+
+TUTOR1_TOKEN=$(signin_user "tutor1@lincoln.edu" "Test1234!")
+assert_not_empty "$TUTOR1_TOKEN" "tutor1 signed in for accept/reject tests"
+
+RESP=$(call_function "respondToBooking" \
+  "{\"requestId\":\"${BR1_ID}\",\"action\":\"accept\"}" \
+  "$TUTOR1_TOKEN")
+SESSION1_ID=$(fn_result "$RESP" sessionId)
+assert_not_empty "$SESSION1_ID" "respondToBooking accept returns sessionId"
+
+BR1=$(get_doc "bookingRequests/${BR1_ID}")
+assert_equals "$(extract_string "$BR1" "status")"    "accepted"      "BookingRequest status is accepted"
+assert_equals "$(extract_string "$BR1" "sessionId")" "$SESSION1_ID"  "BookingRequest sessionId field set"
+
+SESSION1=$(get_doc "sessions/${SESSION1_ID}")
+assert_equals "$(extract_string "$SESSION1" "status")"         "upcoming"        "Created session status is upcoming"
+assert_equals "$(extract_string "$SESSION1" "tutorId")"        "user-tutor-001"  "Created session tutorId correct"
+assert_equals "$(extract_string "$SESSION1" "tuteeId")"        "user-tutee-001"  "Created session tuteeId correct"
+MEET_STATUS=$(extract_string "$SESSION1" "meetLinkStatus")
+if [ "$MEET_STATUS" = "pending" ] || [ "$MEET_STATUS" = "failed" ] || [ "$MEET_STATUS" = "ready" ]; then
+  pass "Created session meetLinkStatus is a valid value (${MEET_STATUS})"
+else
+  fail "Created session meetLinkStatus is a valid value" "pending|failed|ready" "${MEET_STATUS}"
+fi
+
+SLOT1=$(get_doc "users/user-tutor-001/availability/slot-001")
+if echo "$SLOT1" | python -c "
+import json,sys
+d=json.load(sys.stdin)
+bd=d.get('fields',{}).get('bookedDates',{}).get('mapValue',{}).get('fields',{})
+sys.exit(0 if '${NEXT_MONDAY}' in bd else 1)" 2>/dev/null; then
+  pass "Slot bookedDates has entry for ${NEXT_MONDAY}"
+else
+  fail "Slot bookedDates has entry for ${NEXT_MONDAY}" "date key present" "not found"
+fi
+echo ""
+
+# ══════════════════════════════════════════════════════════════════
+# TEST 20: Already-booked slot request blocked
+# ══════════════════════════════════════════════════════════════════
+echo -e "${CYAN}[T20] Already-booked slot request blocked${NC}"
+
+TUTEE2_TOKEN=$(signin_user "tutee2@lincoln.edu" "Test1234!")
+assert_not_empty "$TUTEE2_TOKEN" "tutee2 signed in for slot-taken test"
+
+RESP=$(call_function "requestBooking" \
+  "{\"tutorId\":\"user-tutor-001\",\"slotId\":\"slot-001\",\"scheduledDate\":\"${NEXT_MONDAY}\",\"subject\":\"Algebra\"}" \
+  "$TUTEE2_TOKEN")
+TAKEN_ERR=$(fn_error "$RESP")
+assert_contains "$TAKEN_ERR" "booked|taken|unavailable|already" "Request on already-booked slot is rejected"
+echo ""
+
+# ══════════════════════════════════════════════════════════════════
+# TEST 21: Tutor manually rejects a booking request
+# ══════════════════════════════════════════════════════════════════
+echo -e "${CYAN}[T21] Tutor manually rejects a booking request${NC}"
+
+RESP=$(call_function "requestBooking" \
+  "{\"tutorId\":\"user-tutor-001\",\"slotId\":\"slot-003\",\"scheduledDate\":\"2026-03-21\",\"subject\":\"Computer Science\"}" \
+  "$TUTEE2_TOKEN")
+BR2_ID=$(fn_result "$RESP" requestId)
+assert_not_empty "$BR2_ID" "Request for rejection test created"
+
+RESP=$(call_function "respondToBooking" \
+  "{\"requestId\":\"${BR2_ID}\",\"action\":\"reject\"}" \
+  "$TUTOR1_TOKEN")
+REJECT_OK=$(fn_result "$RESP" success)
+assert_equals "$REJECT_OK" "true" "respondToBooking reject returns success:true"
+
+BR2=$(get_doc "bookingRequests/${BR2_ID}")
+assert_equals "$(extract_string "$BR2" "status")" "rejected" "Manually rejected request has status=rejected"
+echo ""
+
+# ══════════════════════════════════════════════════════════════════
+# TEST 22: Two tutees request same slot — accept one, other auto-rejected
+# ══════════════════════════════════════════════════════════════════
+echo -e "${CYAN}[T22] Competing requests — accept first, second auto-rejected${NC}"
+
+TUTOR2_TOKEN=$(signin_user "tutor2@lincoln.edu" "Test1234!")
+assert_not_empty "$TUTOR2_TOKEN" "tutor2 signed in for competing-requests test"
+
+RESP=$(call_function "requestBooking" \
+  "{\"tutorId\":\"user-tutor-002\",\"slotId\":\"slot-004\",\"scheduledDate\":\"${NEXT_TUESDAY}\",\"subject\":\"Biology\"}" \
+  "$TUTEE1_TOKEN")
+BR3_ID=$(fn_result "$RESP" requestId)
+assert_not_empty "$BR3_ID" "First competing request created (tutee1 → slot-004)"
+
+RESP=$(call_function "requestBooking" \
+  "{\"tutorId\":\"user-tutor-002\",\"slotId\":\"slot-004\",\"scheduledDate\":\"${NEXT_TUESDAY}\",\"subject\":\"Biology\"}" \
+  "$TUTEE2_TOKEN")
+BR4_ID=$(fn_result "$RESP" requestId)
+assert_not_empty "$BR4_ID" "Second competing request created (tutee2 → slot-004)"
+
+RESP=$(call_function "respondToBooking" \
+  "{\"requestId\":\"${BR3_ID}\",\"action\":\"accept\"}" \
+  "$TUTOR2_TOKEN")
+SESSION2_ID=$(fn_result "$RESP" sessionId)
+assert_not_empty "$SESSION2_ID" "Accepting first request creates a session"
+
+SESSION2=$(get_doc "sessions/${SESSION2_ID}")
+assert_equals "$(extract_string "$SESSION2" "tuteeId")" "user-tutee-001" "Accepted session belongs to tutee1"
+
+BR3=$(get_doc "bookingRequests/${BR3_ID}")
+assert_equals "$(extract_string "$BR3" "status")" "accepted" "Accepted request has status=accepted"
+
+BR4=$(get_doc "bookingRequests/${BR4_ID}")
+assert_equals "$(extract_string "$BR4" "status")" "rejected" "Competing tutee2 request auto-rejected on acceptance"
+echo ""
+
+# ══════════════════════════════════════════════════════════════════
+# TEST 23: Tutee cancels own pending booking request
+# ══════════════════════════════════════════════════════════════════
+echo -e "${CYAN}[T23] Tutee cancels own pending booking request${NC}"
+
+RESP=$(call_function "requestBooking" \
+  "{\"tutorId\":\"user-both-001\",\"slotId\":\"slot-006\",\"scheduledDate\":\"${NEXT_WEDNESDAY}\",\"subject\":\"English\"}" \
+  "$TUTEE1_TOKEN")
+BR5_ID=$(fn_result "$RESP" requestId)
+assert_not_empty "$BR5_ID" "Request for cancellation test created"
+
+RESP=$(call_function "cancelBookingRequest" \
+  "{\"requestId\":\"${BR5_ID}\"}" \
+  "$TUTEE1_TOKEN")
+CANCEL_OK=$(fn_result "$RESP" success)
+assert_equals "$CANCEL_OK" "true" "cancelBookingRequest returns success:true"
+
+BR5=$(get_doc "bookingRequests/${BR5_ID}")
+assert_equals "$(extract_string "$BR5" "status")" "cancelled" "Cancelled request has status=cancelled"
+echo ""
+
+# ══════════════════════════════════════════════════════════════════
+# TEST 24: Cross-user cancellation blocked
+# ══════════════════════════════════════════════════════════════════
+echo -e "${CYAN}[T24] Cross-user cancellation blocked${NC}"
+
+# tutee1 creates a fresh request (T23 cancelled the previous one, slot is free again)
+RESP=$(call_function "requestBooking" \
+  "{\"tutorId\":\"user-both-001\",\"slotId\":\"slot-006\",\"scheduledDate\":\"${NEXT_WEDNESDAY}\",\"subject\":\"English\"}" \
+  "$TUTEE1_TOKEN")
+BR6_ID=$(fn_result "$RESP" requestId)
+assert_not_empty "$BR6_ID" "Request for cross-cancel test created"
+
+# tutee2 tries to cancel tutee1's request — must be blocked
+RESP=$(call_function "cancelBookingRequest" \
+  "{\"requestId\":\"${BR6_ID}\"}" \
+  "$TUTEE2_TOKEN")
+CROSS_ERR=$(fn_error "$RESP")
+assert_contains "$CROSS_ERR" "own|permission|cancel|not your" "Cross-user cancel attempt is blocked"
 echo ""
 
 # ══════════════════════════════════════════════════════════════════

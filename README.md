@@ -196,16 +196,49 @@ firebase deploy --only functions
 
 ## Production Deployment
 
-```bash
-# Build and deploy frontend to Firebase Hosting
-cd frontend
-npm run build
-firebase deploy --only hosting
+**Frontend** is served from **AWS S3 + CloudFront** (not Firebase Hosting). The CD pipeline (GitHub Actions) builds the frontend, syncs to S3, and invalidates CloudFront. To create the AWS resources and deploy manually:
 
-# Or build production Docker image
-docker-compose -f docker-compose.yml -f docker-compose.prod.yml build
-docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+```bash
+# 1. Create AWS infrastructure (one-time; see infra/terraform/README.md)
+cd infra/terraform
+terraform init && terraform apply
+
+# 2. Create IAM access key for GitHub Actions, add to GitHub Secrets (S3_BUCKET, CLOUDFRONT_DISTRIBUTION_ID, AWS_*).
+
+# 3. Deploy from your machine (uses .env.production)
+bash scripts/deploy.sh
 ```
+
+**Firebase** (Functions, Firestore rules, **indexes**, Storage) is deployed by CD or via `firebase deploy --only functions,firestore:rules,firestore:indexes,storage` from `backend/`.
+
+Firestore rules and indexes live under **`backend/firestore/`** — there are no Firestore config files at the repo root.
+
+---
+
+## Production checklist
+
+**Detailed steps:** **[docs/production-setup-guide.md](docs/production-setup-guide.md)** · **Post-launch:** **[security & ops checklist](docs/runbooks/security-ops-checklist.md)** · Runbooks: [token rotation](docs/runbooks/token-and-key-rotation.md), [PITR](docs/runbooks/firestore-pitr-and-backups.md), [App Check / WAF](docs/runbooks/app-check-and-waf.md)
+
+### AWS (frontend)
+
+- [ ] `infra/terraform apply` — S3, CloudFront, IAM deploy user (see `infra/terraform/README.md`).
+- [ ] IAM access key → GitHub: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `S3_BUCKET`, `CLOUDFRONT_DISTRIBUTION_ID`.
+- [ ] (Optional) Custom domain: `acm_certificate_arn` + `enable_custom_domain`, or `create_acm_certificate` + `route53_zone_id`.
+- [ ] (Optional) `enable_waf = true` for CloudFront WAF.
+
+### Firebase & function env (all via GitHub Secrets → CD)
+
+- [ ] **`FIREBASE_TOKEN`**, **`FIREBASE_PROJECT_ID`**, web config secrets (API key, auth domain, storage bucket, messaging sender ID, app ID).
+- [ ] **`SENTRY_DSN`**; **`SMTP_PASS`**, **`SMTP_FROM_EMAIL`**, **`SUPER_ADMIN_EMAIL`**; optional **`SMTP_USER`**, **`SMTP_HOST`**, **`SMTP_PORT`**, **`SMTP_FROM_NAME`**.
+- [ ] Optional: **`GOOGLE_CALENDAR_CLIENT_EMAIL`**, **`GOOGLE_CALENDAR_PRIVATE_KEY`**, **`GOOGLE_CALENDAR_ID`**, **`ANTHROPIC_API_KEY`**.
+- [ ] Optional: **`VITE_RECAPTCHA_SITE_KEY`** (App Check), **`VITE_SENTRY_DSN`**.
+
+### Operations
+
+- [ ] Enable **Firestore PITR**: `./scripts/enable-firestore-pitr.sh <gcp-project-id>` (or Console).
+- [ ] Key/token rotation cadence: **[docs/runbooks/token-and-key-rotation.md](docs/runbooks/token-and-key-rotation.md)**; optional OIDC example: `infra/terraform/github-oidc.tf.example`.
+
+CD deploys **functions + Firestore rules + Firestore indexes + storage** and frontend to S3/CloudFront.
 
 ---
 
@@ -257,10 +290,8 @@ firebase functions:log
 
 ---
 
-## Open Items Before Production
+## Open items (optional)
 
-- [ ] Provision real Firebase project and update `.env`
 - [ ] Create SendGrid account and build email templates (5 templates needed)
 - [ ] Create Google Cloud service account with Calendar API + domain-wide delegation
 - [ ] Onboard 2 pilot schools via `registerSchool` callable + ops approval
-- [ ] Set up Firebase Hosting + GitHub Actions CI/CD

@@ -5,14 +5,15 @@ import { useAuth } from "@/lib/auth-context";
 import { useSchool } from "@/lib/school-context";
 import { SchoolBanner } from "@/components/shared/SchoolBanner";
 import { CalendarGrid, type CalendarDot } from "@/components/shared/CalendarGrid";
-import { searchTutors, subscribeUserSessions, getRecommendedTutors } from "@/lib/firestore";
+import { searchTutors, subscribeUserSessions, getRecommendedTutors, subscribeTuteeRequests } from "@/lib/firestore";
 import {
   Button, Input, Select, Modal, Toast, Badge, StarRating, Divider,
 } from "@/components/shared/ui";
-import type { TutorCard as TutorCardType, AvailabilitySlot, SessionDoc, GradeLevel } from "@/lib/types";
+import type { TutorCard as TutorCardType, AvailabilitySlot, SessionDoc, GradeLevel, BookingRequest } from "@/lib/types";
 import { DAYS_OF_WEEK } from "@/lib/types";
-import { doc, updateDoc, addDoc, collection, serverTimestamp, Timestamp } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { doc, updateDoc, addDoc, collection, serverTimestamp } from "firebase/firestore";
+import { httpsCallable } from "firebase/functions";
+import { db, fns } from "@/lib/firebase";
 import { getUserDoc } from "@/lib/firestore";
 
 const GRADES: { value: GradeLevel; label: string }[] = [
@@ -159,14 +160,28 @@ export default function TuteeBooking() {
   // Booking in-flight guard
   const [booking, setBooking] = useState(false);
 
+  // My booking requests (live)
+  const [myRequests, setMyRequests] = useState<BookingRequest[]>([]);
+
   // Toast
   const [toast, setToast] = useState<{ msg: string; type: "success"|"error" } | null>(null);
 
   useEffect(() => {
     if (!currentUser) return;
-    const unsub = subscribeUserSessions(currentUser.uid, "tutee", setSessions);
-    return unsub;
+    const unsubSessions = subscribeUserSessions(currentUser.uid, "tutee", setSessions);
+    const unsubRequests = subscribeTuteeRequests(currentUser.uid, setMyRequests);
+    return () => { unsubSessions(); unsubRequests(); };
   }, [currentUser]);
+
+  // Set of "${slotId}_${scheduledDate}" for all pending requests — used to block duplicate requests
+  const pendingSlotDateSet = useMemo(
+    () => new Set(
+      myRequests
+        .filter((r) => r.status === "pending" || r.status === "accepted")
+        .map((r) => `${r.slotId}_${r.scheduledDate}`)
+    ),
+    [myRequests]
+  );
 
   // Load all tutors when calendar tab is first opened
   useEffect(() => {
@@ -359,20 +374,12 @@ export default function TuteeBooking() {
       t.name.toLowerCase().includes(nameFilter.trim().toLowerCase())
     );
 
-  const handleBook = async () => {
+  const handleRequest = async () => {
     if (!bookModal || !currentUser || !bookingDate || booking) return;
 
-    // ── Duplicate guard ──────────────────────────────────────────────
-    // Reject if the tutee already has an upcoming session with this tutor
-    // on the same date at the same start time.
-    const duplicate = sessions.some((s) => {
-      if (s.status !== "upcoming") return false;
-      if (s.tutorId !== bookModal.tutor.uid) return false;
-      const sDate = s.scheduledDate.toDate().toISOString().split("T")[0];
-      return sDate === bookingDate && s.startTime === bookModal.slot.startTime;
-    });
-    if (duplicate) {
-      setToast({ msg: "You already have this session booked.", type: "error" });
+    const key = `${bookModal.slot.id}_${bookingDate}`;
+    if (pendingSlotDateSet.has(key)) {
+      setToast({ msg: "You already requested this slot for that date.", type: "error" });
       setBookModal(null);
       setBookingDate("");
       return;
@@ -380,55 +387,32 @@ export default function TuteeBooking() {
 
     setBooking(true);
     try {
-      const dateObj = new Date(bookingDate + "T12:00:00");
-      const slot = bookModal.slot;
-
-      if (slot.recurring) {
-        // For recurring slots: update bookedDates map
-        const bookedDates = { ...(slot.bookedDates ?? {}), [bookingDate]: currentUser.uid };
-        await updateDoc(doc(db, "users", bookModal.tutor.uid, "availability", slot.id), {
-          bookedDates,
-        });
-      } else {
-        // For one-off slots: mark as booked
-        await updateDoc(doc(db, "users", bookModal.tutor.uid, "availability", slot.id), {
-          booked: true,
-          bookedBy: currentUser.uid,
-        });
-      }
-
-      // Create session doc
-      await addDoc(collection(db, "sessions"), {
-        tutorId: bookModal.tutor.uid,
-        tuteeId: currentUser.uid,
-        tutorName: bookModal.tutor.name,
-        tuteeName: currentUser.name,
-        subject: bookingSubject || bookModal.tutor.subjects[0],
-        slotId: slot.id,
-        day: slot.day,
-        startTime: slot.startTime,
-        endTime: slot.endTime,
-        duration: slot.duration,
-        scheduledDate: Timestamp.fromDate(dateObj),
-        status: "upcoming",
-        meetLinkStatus: "pending",
-        schoolDomain: currentUser.schoolDomain,
-        createdAt: serverTimestamp(),
-        tutorRated: false,
-        tuteeRated: false,
-        // Track booking type for cancellation logic
-        recurringSlot: slot.recurring,
-        bookedDate: bookingDate,
+      const fn = httpsCallable<unknown, { requestId: string }>(fns, "requestBooking");
+      await fn({
+        tutorId:       bookModal.tutor.uid,
+        slotId:        bookModal.slot.id,
+        subject:       bookingSubject || bookModal.tutor.subjects[0],
+        scheduledDate: bookingDate,
       });
-
       setBookModal(null);
       setBookingDate("");
       setTab("sessions");
-      setToast({ msg: "Session booked!", type: "success" });
+      setToast({ msg: "Request sent! The tutor will confirm shortly.", type: "success" });
     } catch (err: unknown) {
-      setToast({ msg: (err as Error).message ?? "Booking failed", type: "error" });
+      const msg = (err as { message?: string })?.message ?? "Request failed";
+      setToast({ msg, type: "error" });
     } finally {
       setBooking(false);
+    }
+  };
+
+  const handleCancelRequest = async (requestId: string) => {
+    try {
+      const fn = httpsCallable<unknown, { success: boolean }>(fns, "cancelBookingRequest");
+      await fn({ requestId });
+      setToast({ msg: "Request cancelled", type: "success" });
+    } catch (err: unknown) {
+      setToast({ msg: (err as { message?: string })?.message ?? "Cancel failed", type: "error" });
     }
   };
 
@@ -873,13 +857,17 @@ export default function TuteeBooking() {
                             {slots.map((slot) => (
                               <div key={slot.id} className="flex items-center justify-between bg-green-50 border border-green-100 rounded px-3 py-2 text-sm text-green-700">
                                 <span className="font-medium">{slot.startTime}–{slot.endTime} <span className="text-xs opacity-60">({slot.duration} min)</span></span>
-                                <Button size="sm" onClick={() => {
-                                  setBookModal({ tutor, slot });
-                                  setBookingSubject(tutor.subjects[0] ?? "");
-                                  setBookingDate(calSelected);
-                                }}>
-                                  Book
-                                </Button>
+                                {pendingSlotDateSet.has(`${slot.id}_${calSelected}`) ? (
+                                  <Badge color="amber">Requested</Badge>
+                                ) : (
+                                  <Button size="sm" onClick={() => {
+                                    setBookModal({ tutor, slot });
+                                    setBookingSubject(tutor.subjects[0] ?? "");
+                                    setBookingDate(calSelected);
+                                  }}>
+                                    Request
+                                  </Button>
+                                )}
                               </div>
                             ))}
                           </div>
@@ -955,13 +943,66 @@ export default function TuteeBooking() {
               </div>
             </div>
           )}
+
+          {/* My Requests */}
+          {myRequests.length > 0 && (
+            <div>
+              <h2 className="font-display text-xl text-gray-900 mb-3">My Requests</h2>
+              <div className="flex flex-col gap-2">
+                {myRequests.map((req) => {
+                  const isPending  = req.status === "pending";
+                  const isAccepted = req.status === "accepted";
+                  const isRejected = req.status === "rejected" || req.status === "cancelled";
+                  return (
+                    <div
+                      key={req.id}
+                      className={`border rounded-lg p-4 text-sm flex items-center justify-between gap-3 ${
+                        isPending  ? "border-amber-200 bg-amber-50"
+                        : isAccepted ? "border-green-200 bg-green-50"
+                        : "border-gray-100 bg-gray-50"
+                      }`}
+                    >
+                      <div>
+                        <p className="font-medium text-gray-900">
+                          {req.tutorName} — {req.subject}
+                        </p>
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          {format(new Date(req.scheduledDate + "T12:00:00"), "EEE, MMM d")}
+                          {" · "}{req.startTime}–{req.endTime} ({req.duration} min)
+                        </p>
+                        {isRejected && req.rejectionReason && (
+                          <p className="text-xs text-red-600 mt-1">
+                            {req.rejectionReason === "slot_taken"
+                              ? "Slot was taken by another student"
+                              : req.status === "cancelled"
+                              ? "Request cancelled"
+                              : "Declined by tutor"}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <Badge color={isPending ? "amber" : isAccepted ? "green" : "gray"}>
+                          {isPending ? "Pending" : isAccepted ? "Accepted" : req.status === "cancelled" ? "Cancelled" : "Declined"}
+                        </Badge>
+                        {isPending && (
+                          <Button size="sm" variant="ghost" onClick={() => handleCancelRequest(req.id)}>
+                            Cancel
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
-      {/* ── Book Modal ── */}
-      <Modal open={!!bookModal} onClose={() => { setBookModal(null); setBookingDate(""); }} title="Book a Session">
+      {/* ── Request Modal ── */}
+      <Modal open={!!bookModal} onClose={() => { setBookModal(null); setBookingDate(""); }} title="Request a Session">
         {bookModal && (() => {
-          // Dates the slot has available, minus any already booked by this tutee
+          // Exclude dates where tutee already has a confirmed session or a pending/accepted request
           const alreadyBooked = new Set(
             sessions
               .filter(
@@ -972,8 +1013,13 @@ export default function TuteeBooking() {
               )
               .map((s) => s.scheduledDate.toDate().toISOString().split("T")[0])
           );
+          const alreadyRequested = new Set(
+            myRequests
+              .filter((r) => (r.status === "pending" || r.status === "accepted") && r.slotId === bookModal.slot.id)
+              .map((r) => r.scheduledDate)
+          );
           const availDates = getAvailableDates(bookModal.slot).filter(
-            (d) => !alreadyBooked.has(d)
+            (d) => !alreadyBooked.has(d) && !alreadyRequested.has(d)
           );
           return (
             <div className="flex flex-col gap-4">
@@ -1008,7 +1054,7 @@ export default function TuteeBooking() {
                   Select Date
                 </p>
                 {availDates.length === 0 ? (
-                  <p className="text-sm text-red-500">No available dates — you may have already booked this slot.</p>
+                  <p className="text-sm text-red-500">No available dates — you may have already requested or booked this slot.</p>
                 ) : availDates.length === 1 ? (
                   // Auto-select the only available date
                   <div
@@ -1044,17 +1090,17 @@ export default function TuteeBooking() {
                 onChange={(e) => setBookingSubject(e.target.value)}
               />
               <div className="bg-blue-50 border border-blue-100 rounded p-3 text-xs text-blue-700">
-                A Google Meet link and calendar invite will be sent to your school email within 30 seconds.
+                Your request goes to the tutor for approval. A Google Meet link will be sent to your email once accepted.
               </div>
               <Divider />
               <div className="flex justify-end gap-2">
                 <Button variant="secondary" onClick={() => setBookModal(null)}>Cancel</Button>
                 <Button
-                  onClick={handleBook}
+                  onClick={handleRequest}
                   loading={booking}
                   disabled={booking || !bookingDate || availDates.length === 0}
                 >
-                  Confirm Booking
+                  Send Request
                 </Button>
               </div>
             </div>
@@ -1240,7 +1286,7 @@ function TutorCard({
                 {" · "}{slot.startTime}--{slot.endTime}{" "}
                 <span className="text-gray-400">({slot.duration} min)</span>
               </div>
-              <Button size="sm" onClick={() => onBook(slot)}>Book</Button>
+              <Button size="sm" onClick={() => onBook(slot)}>Request</Button>
             </div>
           ))}
         </div>

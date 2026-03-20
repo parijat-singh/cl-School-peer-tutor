@@ -14,17 +14,18 @@ import { db, storage } from "./firebase";
 import { fns } from "./firebase";
 import type {
   UserDoc, AvailabilitySlot, SessionDoc, ReviewDoc,
-  SchoolDoc, StatsDoc, TutorCard,
+  SchoolDoc, StatsDoc, TutorCard, BookingRequest,
 } from "./types";
 
 // ── Collection refs ──────────────────────────────────────────────
-export const usersCol      = () => collection(db, "users");
-export const sessionsCol   = () => collection(db, "sessions");
-export const reviewsCol    = () => collection(db, "reviews");
-export const schoolsCol    = () => collection(db, "schools");
-export const auditCol      = () => collection(db, "adminAuditLog");
-export const statsCol      = () => collection(db, "stats");
-export const availCol      = (uid: string) => collection(db, "users", uid, "availability");
+export const usersCol           = () => collection(db, "users");
+export const sessionsCol        = () => collection(db, "sessions");
+export const reviewsCol         = () => collection(db, "reviews");
+export const schoolsCol         = () => collection(db, "schools");
+export const auditCol           = () => collection(db, "adminAuditLog");
+export const statsCol           = () => collection(db, "stats");
+export const availCol           = (uid: string) => collection(db, "users", uid, "availability");
+export const bookingRequestsCol = () => collection(db, "bookingRequests");
 
 // ── Users ────────────────────────────────────────────────────────
 
@@ -208,6 +209,39 @@ export function subscribeUserSessions(
   );
   return onSnapshot(q, (snap) => {
     cb(snap.docs.map((d) => ({ id: d.id, ...d.data() } as SessionDoc)));
+  });
+}
+
+// ── Booking requests ─────────────────────────────────────────────
+
+/** Live stream of all pending requests in the tutor's queue, newest first */
+export function subscribeTutorRequests(
+  tutorId: string,
+  cb: (requests: BookingRequest[]) => void
+): Unsubscribe {
+  const q = query(
+    bookingRequestsCol(),
+    where("tutorId", "==", tutorId),
+    where("status",  "==", "pending"),
+    orderBy("createdAt", "desc")
+  );
+  return onSnapshot(q, (snap) => {
+    cb(snap.docs.map((d) => ({ id: d.id, ...d.data() } as BookingRequest)));
+  });
+}
+
+/** Live stream of all booking requests made by the tutee, newest first */
+export function subscribeTuteeRequests(
+  tuteeId: string,
+  cb: (requests: BookingRequest[]) => void
+): Unsubscribe {
+  const q = query(
+    bookingRequestsCol(),
+    where("tuteeId", "==", tuteeId),
+    orderBy("createdAt", "desc")
+  );
+  return onSnapshot(q, (snap) => {
+    cb(snap.docs.map((d) => ({ id: d.id, ...d.data() } as BookingRequest)));
   });
 }
 

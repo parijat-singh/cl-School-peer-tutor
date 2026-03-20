@@ -3,7 +3,7 @@
 # Usage: bash scripts/seed-emulator.sh
 
 PROJECT_ID="peertutor-dev"
-FIRESTORE_URL="http://localhost:8080/v1/projects/${PROJECT_ID}/databases/(default)/documents"
+FIRESTORE_URL="http://localhost:8090/v1/projects/${PROJECT_ID}/databases/(default)/documents"
 AUTH_ADMIN_URL="http://localhost:9099/identitytoolkit.googleapis.com/v1/projects/${PROJECT_ID}"
 AUTH_EMULATOR_URL="http://localhost:9099"
 

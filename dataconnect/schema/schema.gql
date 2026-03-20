@@ -1,0 +1,50 @@
+type User @table {
+  firebaseUid: String!
+  displayName: String!
+  userType: String!
+  createdAt: Timestamp!
+  email: String
+  photoUrl: String
+  gradeLevel: String
+  major: String
+}
+
+type Subject @table {
+  name: String!
+  createdAt: Timestamp!
+}
+
+type TutorProfile @table {
+  user: User!
+  bio: String!
+  createdAt: Timestamp!
+  averageRating: Float
+}
+
+type TutorSubject @table(key: ["tutorProfile", "subject"]) {
+  tutorProfile: TutorProfile!
+  subject: Subject!
+  createdAt: Timestamp!
+}
+
+type Session @table {
+  student: User!
+  tutor: User!
+  subject: Subject!
+  startTime: Timestamp!
+  endTime: Timestamp!
+  status: String!
+  createdAt: Timestamp!
+  location: String
+  tutorNotes: String
+  studentNotes: String
+}
+
+type Review @table {
+  session: Session!
+  reviewer: User!
+  reviewedTutor: User!
+  rating: Int!
+  createdAt: Timestamp!
+  comment: String
+}
