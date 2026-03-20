@@ -14,7 +14,7 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "text-summary", "json-summary"],
-      include: ["src/lib/**/*.{ts,tsx}"],
+      include: ["src/lib/**/*.ts"],
       exclude: [
         "**/*.test.*", "**/*.d.ts", "**/vite-env.d.ts",
         "src/lib/firebase.ts",
