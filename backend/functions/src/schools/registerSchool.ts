@@ -5,6 +5,7 @@
 import * as functions from "firebase-functions/v2/https";
 import * as nodemailer from "nodemailer";
 import { db, FieldValue } from "../lib/admin";
+import { captureError } from "../lib/sentry";
 
 export const registerSchool = functions.onCall(
   { region: "us-central1" },
@@ -65,6 +66,7 @@ export const registerSchool = functions.onCall(
         text:    `School: ${name}\nDomain: ${domain}\nType: ${type}\nAdmin: ${adminEmail}\n\nApprove at: https://schoolpeertutor.com/admin/schools/${domain}`,
       });
     } catch (err) {
+      captureError(err, { function: "registerSchool", action: "superAdminNotificationEmail" });
       console.error("Super admin notification email failed:", err);
     }
 

@@ -10,6 +10,7 @@ import { format }                    from "date-fns";
 import { shouldEnforceAppCheck } from "../lib/runtime";
 import { checkAndConsumeRateLimit } from "../lib/rateLimit";
 import { dateOnlyToNoonUtcDate, dateOnlyToTimestamp } from "../lib/dates";
+import { captureError } from "../lib/sentry";
 
 export const bookSessionSchema = z.object({
   tutorId:       z.string().min(1),
@@ -137,7 +138,7 @@ export const bookSession = functions.onCall(
         meetLinkStatus:  "ready",
       });
     } catch (err) {
-      // Graceful degradation — log but don't fail the booking
+      captureError(err, { function: "bookSession", action: "meetProvisioning" });
       console.error("Meet provisioning failed:", err);
       meetLinkStatus = "failed";
       await sessionRef.update({ meetLinkStatus: "failed" });
@@ -160,6 +161,7 @@ export const bookSession = functions.onCall(
         sessionId:     sessionRef.id,
       });
     } catch (emailErr) {
+      captureError(emailErr, { function: "bookSession", action: "bookingEmail" });
       console.error("Booking email failed:", emailErr);
       // Don't fail the booking if email fails
     }

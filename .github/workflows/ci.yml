@@ -43,7 +43,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -95,19 +95,19 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: |
             frontend/package-lock.json
             backend/functions/package-lock.json
 
-      - name: Frontend unit tests (with 75% coverage gate)
+      - name: Frontend unit tests (with 80% coverage gate)
         run: |
           cd frontend
           npm ci --prefer-offline
           npm run test:ci -- --coverage
 
-      - name: Backend unit tests (with 75% coverage gate)
+      - name: Backend unit tests (with 80% coverage gate)
         run: |
           cd backend/functions
           npm ci --prefer-offline
@@ -137,7 +137,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: |
             backend/functions/package-lock.json

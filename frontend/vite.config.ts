@@ -5,20 +5,25 @@ import path from "path";
 
 export default defineConfig({
   plugins: [react()],
+  css: { postcss: {} },
   test: {
-    environment: "jsdom",
+    css: false,
+    environment: "node",
     globals: true,
     include: ["src/**/*.test.{ts,tsx}"],
     coverage: {
       provider: "v8",
       reporter: ["text", "text-summary", "json-summary"],
-      include: ["src/lib/types.ts", "src/lib/slotUtils.ts"],
-      exclude: ["**/*.test.*", "**/*.d.ts", "**/vite-env.d.ts"],
+      include: ["src/lib/**/*.ts"],
+      exclude: [
+        "**/*.test.*", "**/*.d.ts", "**/vite-env.d.ts",
+        "src/lib/firebase.ts",
+      ],
       thresholds: {
-        statements: 75,
-        branches: 75,
-        functions: 75,
-        lines: 75,
+        statements: 80,
+        branches: 80,
+        functions: 80,
+        lines: 80,
       },
     },
   },

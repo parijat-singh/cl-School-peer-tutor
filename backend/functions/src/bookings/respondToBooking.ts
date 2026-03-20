@@ -19,6 +19,7 @@ import { sendBookingConfirmation, sendRequestRejectedEmail } from "../lib/email"
 import { format } from "date-fns";
 import { shouldEnforceAppCheck } from "../lib/runtime";
 import { dateOnlyToNoonUtcDate, dateOnlyToTimestamp } from "../lib/dates";
+import { captureError } from "../lib/sentry";
 
 export const respondToBookingSchema = z.object({
   requestId:       z.string().min(1),
@@ -82,7 +83,7 @@ export const respondToBooking = functions.onCall(
         startTime:     req.startTime,
         endTime:       req.endTime,
         reason:        "tutor_declined",
-      }).catch(err => console.error("Rejection email failed:", err));
+      }).catch(err => { captureError(err, { function: "respondToBooking", action: "rejectionEmail" }); console.error("Rejection email failed:", err); });
 
       return { success: true };
     }
@@ -192,6 +193,7 @@ export const respondToBooking = functions.onCall(
         meetLinkStatus:  "ready",
       });
     } catch (err) {
+      captureError(err, { function: "respondToBooking", action: "meetProvisioning" });
       console.error("Meet provisioning failed:", err);
       meetLinkStatus = "failed";
       await sessionRef.update({ meetLinkStatus: "failed" });
@@ -211,7 +213,7 @@ export const respondToBooking = functions.onCall(
       scheduledDate: format(scheduledNoon, "EEEE, MMMM d, yyyy"),
       meetLink,
       sessionId:     sessionRef.id,
-    }).catch(err => console.error("Confirmation email failed:", err));
+    }).catch(err => { captureError(err, { function: "respondToBooking", action: "confirmationEmail" }); console.error("Confirmation email failed:", err); });
 
     // ── Send rejection emails to auto-rejected tutees ────────────
     if (siblingRefs.length > 0) {
@@ -229,7 +231,7 @@ export const respondToBooking = functions.onCall(
           startTime:     sib.startTime,
           endTime:       sib.endTime,
           reason:        "slot_taken",
-        }).catch(err => console.error("Auto-rejection email failed:", err));
+        }).catch(err => { captureError(err, { function: "respondToBooking", action: "autoRejectionEmail" }); console.error("Auto-rejection email failed:", err); });
       }
     }
 

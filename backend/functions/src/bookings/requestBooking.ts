@@ -8,6 +8,7 @@ import { z }          from "zod";
 import { db, FieldValue, Timestamp } from "../lib/admin";
 import { sendBookingRequestEmail }   from "../lib/email";
 import { shouldEnforceAppCheck } from "../lib/runtime";
+import { captureError } from "../lib/sentry";
 
 export const requestBookingSchema = z.object({
   tutorId:       z.string().min(1),
@@ -121,7 +122,7 @@ export const requestBooking = functions.onCall(
       endTime:       slot.endTime,
       duration:      slot.duration,
       requestId:     requestRef.id,
-    }).catch(err => console.error("Request notification email failed:", err));
+    }).catch(err => { captureError(err, { function: "requestBooking", action: "requestNotificationEmail" }); console.error("Request notification email failed:", err); });
 
     return { requestId: requestRef.id };
   }

@@ -5,6 +5,7 @@ import * as functions from "firebase-functions/v2/scheduler";
 import { db, Timestamp } from "../lib/admin";
 import { sendReminderEmail } from "../lib/email";
 import { addHours }          from "date-fns";
+import { captureError }      from "../lib/sentry";
 
 export const sendSessionReminders = functions.onSchedule(
   { schedule: "every 60 minutes", region: "us-central1" },
@@ -48,6 +49,7 @@ export const sendSessionReminders = functions.onSchedule(
             sendReminderEmail({ ...params, recipientEmail: tutee.email, recipientName: tutee.name, otherPartyName: tutor.name }),
           ]);
         } catch (err) {
+          captureError(err, { function: "sendSessionReminders", action: "reminderEmail" });
           console.error(`Reminder email failed for session ${s.id}:`, err);
         }
       }

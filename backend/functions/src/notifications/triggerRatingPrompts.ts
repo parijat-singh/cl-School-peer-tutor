@@ -5,6 +5,7 @@ import * as functions from "firebase-functions/v2/scheduler";
 import { db, Timestamp, FieldValue } from "../lib/admin";
 import { sendRatingPrompt }          from "../lib/email";
 import { subMinutes }                from "date-fns";
+import { captureError }              from "../lib/sentry";
 
 export const triggerRatingPrompts = functions.onSchedule(
   { schedule: "every 15 minutes", region: "us-central1" },
@@ -41,6 +42,7 @@ export const triggerRatingPrompts = functions.onSchedule(
           !session.tuteeRated && sendRatingPrompt({ ...base, recipientEmail: tutee.email, recipientName: tutee.name, otherPartyName: tutor.name }),
         ]);
       } catch (err) {
+        captureError(err, { function: "triggerRatingPrompts", action: "ratingPromptEmail" });
         console.error(`Rating prompt failed for session ${s.id}:`, err);
       }
     }
