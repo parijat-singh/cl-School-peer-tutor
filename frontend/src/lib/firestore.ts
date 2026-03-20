@@ -223,7 +223,8 @@ export function subscribeTutorRequests(
     bookingRequestsCol(),
     where("tutorId", "==", tutorId),
     where("status",  "==", "pending"),
-    orderBy("createdAt", "desc")
+    orderBy("createdAt", "desc"),
+    limit(50)
   );
   return onSnapshot(q, (snap) => {
     cb(snap.docs.map((d) => ({ id: d.id, ...d.data() } as BookingRequest)));
@@ -238,7 +239,8 @@ export function subscribeTuteeRequests(
   const q = query(
     bookingRequestsCol(),
     where("tuteeId", "==", tuteeId),
-    orderBy("createdAt", "desc")
+    orderBy("createdAt", "desc"),
+    limit(50)
   );
   return onSnapshot(q, (snap) => {
     cb(snap.docs.map((d) => ({ id: d.id, ...d.data() } as BookingRequest)));
@@ -269,7 +271,8 @@ export function subscribeSchoolReviews(
   const q = query(
     reviewsCol(),
     where("schoolDomain", "==", schoolDomain),
-    orderBy("createdAt", "desc")
+    orderBy("createdAt", "desc"),
+    limit(50)
   );
   return onSnapshot(q, (snap) => {
     cb(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ReviewDoc)));

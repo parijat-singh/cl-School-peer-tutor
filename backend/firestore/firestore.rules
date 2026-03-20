@@ -165,8 +165,10 @@ service cloud.firestore {
         isSuperAdmin()
       );
 
-      // Same-domain users can flag reviews (client-side flagReview function)
-      allow update: if isSignedIn() && sameDomain(resource.data.schoolDomain);
+      // Same-domain users can only flag reviews (flagged + flaggedBy fields)
+      allow update: if isSignedIn() &&
+        sameDomain(resource.data.schoolDomain) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(["flagged", "flaggedBy"]);
 
       // Reviews are created and deleted by Cloud Functions
       allow create, delete: if false;
