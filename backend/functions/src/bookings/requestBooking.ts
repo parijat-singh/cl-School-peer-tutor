@@ -109,21 +109,28 @@ export const requestBooking = functions.onCall(
       createdAt:     FieldValue.serverTimestamp(),
     });
 
-    // Notify the tutor by email (non-blocking)
-    sendBookingRequestEmail({
-      tutorEmail:    tutor.email,
-      tutorName:     tutor.name,
-      tuteeName:     tutee.name,
-      tuteeEmail:    tutee.email,
-      subject,
-      scheduledDate,
-      day:           slot.day,
-      startTime:     slot.startTime,
-      endTime:       slot.endTime,
-      duration:      slot.duration,
-      requestId:     requestRef.id,
-    }).catch(err => { captureError(err, { function: "requestBooking", action: "requestNotificationEmail" }); console.error("Request notification email failed:", err); });
+    // Notify the tutor by email
+    let emailSent = false;
+    try {
+      await sendBookingRequestEmail({
+        tutorEmail:    tutor.email,
+        tutorName:     tutor.name,
+        tuteeName:     tutee.name,
+        tuteeEmail:    tutee.email,
+        subject,
+        scheduledDate,
+        day:           slot.day,
+        startTime:     slot.startTime,
+        endTime:       slot.endTime,
+        duration:      slot.duration,
+        requestId:     requestRef.id,
+      });
+      emailSent = true;
+    } catch (err) {
+      captureError(err, { function: "requestBooking", action: "requestNotificationEmail" });
+      console.error("Request notification email failed:", err);
+    }
 
-    return { requestId: requestRef.id };
+    return { requestId: requestRef.id, emailSent };
   }
 );

@@ -38,7 +38,7 @@ describe("registerSchool", () => {
 
   it("rejects missing fields", async () => {
     await expect(handler({ data: { name: "", domain: "", adminEmail: "", type: "" } }))
-      .rejects.toThrow("All fields required");
+      .rejects.toThrow();
   });
 
   it("rejects invalid domain format", async () => {
@@ -53,20 +53,32 @@ describe("registerSchool", () => {
   });
 
   it("creates school and sends admin notification", async () => {
+    process.env.SUPER_ADMIN_EMAIL = "admin@test.com";
     mockDocGet.mockResolvedValue({ exists: false });
     const result = await handler({ data: validData });
-    expect(result).toEqual(expect.objectContaining({ success: true }));
+    expect(result).toEqual(expect.objectContaining({ success: true, emailSent: true }));
     expect(mockDocSet).toHaveBeenCalledWith(expect.objectContaining({
       domain: "test.edu", approved: false,
     }));
     expect(mockSendMail).toHaveBeenCalled();
+    delete process.env.SUPER_ADMIN_EMAIL;
+  });
+
+  it("skips email when SUPER_ADMIN_EMAIL is not set", async () => {
+    delete process.env.SUPER_ADMIN_EMAIL;
+    mockDocGet.mockResolvedValue({ exists: false });
+    const result = await handler({ data: validData });
+    expect(result).toEqual(expect.objectContaining({ success: true, emailSent: false }));
+    expect(mockSendMail).not.toHaveBeenCalled();
   });
 
   it("handles email failure gracefully", async () => {
+    process.env.SUPER_ADMIN_EMAIL = "admin@test.com";
     mockDocGet.mockResolvedValue({ exists: false });
     mockSendMail.mockRejectedValueOnce(new Error("SMTP down"));
     const result = await handler({ data: validData });
-    expect(result).toEqual(expect.objectContaining({ success: true }));
+    expect(result).toEqual(expect.objectContaining({ success: true, emailSent: false }));
     expect(mockCaptureError).toHaveBeenCalled();
+    delete process.env.SUPER_ADMIN_EMAIL;
   });
 });

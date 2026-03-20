@@ -1,6 +1,12 @@
 // functions/src/reviews/adminDeleteReview.ts
 import * as functions from "firebase-functions/v2/https";
+import { z } from "zod";
 import { db, FieldValue } from "../lib/admin";
+
+export const adminDeleteReviewSchema = z.object({
+  reviewId: z.string().min(1),
+  reason:   z.string().min(1).max(500),
+});
 
 export const adminDeleteReview = functions.onCall(
   { region: "us-central1" },
@@ -11,8 +17,9 @@ export const adminDeleteReview = functions.onCall(
       throw new functions.HttpsError("permission-denied", "Admins only.");
     }
 
-    const { reviewId, reason } = request.data as { reviewId: string; reason: string };
-    if (!reviewId || !reason) throw new functions.HttpsError("invalid-argument", "reviewId and reason required.");
+    const parsed = adminDeleteReviewSchema.safeParse(request.data);
+    if (!parsed.success) throw new functions.HttpsError("invalid-argument", "reviewId and reason required.");
+    const { reviewId, reason } = parsed.data;
 
     const reviewSnap = await db.collection("reviews").doc(reviewId).get();
     if (!reviewSnap.exists) throw new functions.HttpsError("not-found", "Review not found.");

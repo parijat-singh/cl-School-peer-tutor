@@ -2,9 +2,16 @@
 // Callable function: uses Claude AI to rank tutors based on reviews, availability, and search context
 
 import * as functions from "firebase-functions/v2/https";
+import { z } from "zod";
 import { db } from "../lib/admin";
 import { shouldEnforceAppCheck } from "../lib/runtime";
 import { captureError } from "../lib/sentry";
+
+const rankedTutorSchema = z.array(z.object({
+  uid:    z.string(),
+  score:  z.number().min(0).max(100),
+  reason: z.string(),
+}));
 
 interface TutorInput {
   uid: string;
@@ -162,6 +169,7 @@ Score should be 0-100. Order from highest to lowest score. The "reason" should b
           max_tokens: 1024,
           messages: [{ role: "user", content: prompt }],
         }),
+        signal: AbortSignal.timeout(30_000),
       });
 
       if (!response.ok) {
@@ -180,7 +188,11 @@ Score should be 0-100. Order from highest to lowest score. The "reason" should b
         throw new Error("Could not parse JSON from Claude response");
       }
 
-      const ranked: RankedTutor[] = JSON.parse(jsonMatch[0]);
+      const parsedRanked = rankedTutorSchema.safeParse(JSON.parse(jsonMatch[0]));
+      if (!parsedRanked.success) {
+        throw new Error("Claude response failed schema validation");
+      }
+      const ranked: RankedTutor[] = parsedRanked.data;
 
       // Validate: ensure all UIDs are from original list
       const validUids = new Set(tutors.map((t) => t.uid));

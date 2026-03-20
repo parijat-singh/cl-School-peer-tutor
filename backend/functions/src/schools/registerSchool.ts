@@ -4,27 +4,25 @@
 
 import * as functions from "firebase-functions/v2/https";
 import * as nodemailer from "nodemailer";
+import { z } from "zod";
 import { db, FieldValue } from "../lib/admin";
 import { captureError } from "../lib/sentry";
+
+export const registerSchoolSchema = z.object({
+  name:       z.string().min(1).max(200),
+  domain:     z.string().regex(/^[a-z0-9.-]+\.[a-z]{2,}$/, "Invalid domain format."),
+  adminEmail: z.string().email(),
+  type:       z.enum(["middle", "high", "k12"]),
+});
 
 export const registerSchool = functions.onCall(
   { region: "us-central1" },
   async (request) => {
-    const { name, domain, adminEmail, type } = request.data as {
-      name:       string;
-      domain:     string;
-      adminEmail: string;
-      type:       "middle" | "high" | "k12";
-    };
-
-    if (!name || !domain || !adminEmail || !type) {
-      throw new functions.HttpsError("invalid-argument", "All fields required.");
+    const parsed = registerSchoolSchema.safeParse(request.data);
+    if (!parsed.success) {
+      throw new functions.HttpsError("invalid-argument", parsed.error.issues[0]?.message ?? "Invalid input.");
     }
-
-    // Validate domain format
-    if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain)) {
-      throw new functions.HttpsError("invalid-argument", "Invalid domain format.");
-    }
+    const { name, domain, adminEmail, type } = parsed.data;
 
     // Check if already registered
     const existing = await db.collection("schools").doc(domain).get();
@@ -50,28 +48,35 @@ export const registerSchool = functions.onCall(
     });
 
     // Notify all super admins
-    try {
-      const smtpPort = Number(process.env.SMTP_PORT ?? "465");
-      const t = nodemailer.createTransport({
-        host:   process.env.SMTP_HOST ?? "smtp.resend.com",
-        port:   smtpPort,
-        secure: smtpPort === 465,
-        auth:   { user: process.env.SMTP_USER ?? "", pass: process.env.SMTP_PASS ?? "" },
-        tls:    { rejectUnauthorized: false },
-      });
-      await t.sendMail({
-        from:    `"${process.env.SMTP_FROM_NAME ?? "PeerTutor"}" <${process.env.SMTP_FROM_EMAIL ?? ""}>`,
-        to:      process.env.SUPER_ADMIN_EMAIL ?? "",
-        subject: `New school registration: ${name} (${domain})`,
-        text:    `School: ${name}\nDomain: ${domain}\nType: ${type}\nAdmin: ${adminEmail}\n\nApprove at: https://schoolpeertutor.com/admin/schools/${domain}`,
-      });
-    } catch (err) {
-      captureError(err, { function: "registerSchool", action: "superAdminNotificationEmail" });
-      console.error("Super admin notification email failed:", err);
+    let emailSent = false;
+    const superAdminEmail = process.env.SUPER_ADMIN_EMAIL;
+    if (!superAdminEmail) {
+      console.warn("SUPER_ADMIN_EMAIL not set — skipping admin notification.");
+    } else {
+      try {
+        const smtpPort = Number(process.env.SMTP_PORT ?? "465");
+        const t = nodemailer.createTransport({
+          host:   process.env.SMTP_HOST ?? "smtp.resend.com",
+          port:   smtpPort,
+          secure: smtpPort === 465,
+          auth:   { user: process.env.SMTP_USER ?? "", pass: process.env.SMTP_PASS ?? "" },
+        });
+        await t.sendMail({
+          from:    `"${process.env.SMTP_FROM_NAME ?? "PeerTutor"}" <${process.env.SMTP_FROM_EMAIL ?? ""}>`,
+          to:      superAdminEmail,
+          subject: `New school registration: ${name} (${domain})`,
+          text:    `School: ${name}\nDomain: ${domain}\nType: ${type}\nAdmin: ${adminEmail}\n\nApprove at: https://schoolpeertutor.com/admin/schools/${domain}`,
+        });
+        emailSent = true;
+      } catch (err) {
+        captureError(err, { function: "registerSchool", action: "superAdminNotificationEmail" });
+        console.error("Super admin notification email failed:", err);
+      }
     }
 
     return {
       success: true,
+      emailSent,
       message: "Registration submitted. Your school will be approved within 24 hours.",
     };
   }

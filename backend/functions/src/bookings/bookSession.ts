@@ -145,6 +145,7 @@ export const bookSession = functions.onCall(
     }
 
     // ── Send confirmation emails ────────────────────────────────
+    let emailSent = false;
     try {
       await sendBookingConfirmation({
         tutorEmail:    tutor.email,
@@ -160,16 +161,17 @@ export const bookSession = functions.onCall(
         meetLink,
         sessionId:     sessionRef.id,
       });
+      emailSent = true;
     } catch (emailErr) {
       captureError(emailErr, { function: "bookSession", action: "bookingEmail" });
       console.error("Booking email failed:", emailErr);
-      // Don't fail the booking if email fails
     }
 
     return {
       sessionId:     sessionRef.id,
       meetLink,
       meetLinkStatus,
+      emailSent,
       message:       meetLinkStatus === "ready"
         ? "Session booked! Google Meet link sent to your email."
         : "Session booked! Meet link will be emailed shortly.",

@@ -73,19 +73,26 @@ export const respondToBooking = functions.onCall(
         respondedAt:     FieldValue.serverTimestamp(),
       });
 
-      sendRequestRejectedEmail({
-        tuteeEmail:    req.tuteeEmail,
-        tuteeName:     req.tuteeName,
-        tutorName:     req.tutorName,
-        subject:       req.subject,
-        scheduledDate: req.scheduledDate,
-        day:           req.day,
-        startTime:     req.startTime,
-        endTime:       req.endTime,
-        reason:        "tutor_declined",
-      }).catch(err => { captureError(err, { function: "respondToBooking", action: "rejectionEmail" }); console.error("Rejection email failed:", err); });
+      let emailSent = false;
+      try {
+        await sendRequestRejectedEmail({
+          tuteeEmail:    req.tuteeEmail,
+          tuteeName:     req.tuteeName,
+          tutorName:     req.tutorName,
+          subject:       req.subject,
+          scheduledDate: req.scheduledDate,
+          day:           req.day,
+          startTime:     req.startTime,
+          endTime:       req.endTime,
+          reason:        "tutor_declined",
+        });
+        emailSent = true;
+      } catch (err) {
+        captureError(err, { function: "respondToBooking", action: "rejectionEmail" });
+        console.error("Rejection email failed:", err);
+      }
 
-      return { success: true };
+      return { success: true, emailSent };
     }
 
     // ── ACCEPT ───────────────────────────────────────────────────────
@@ -200,24 +207,30 @@ export const respondToBooking = functions.onCall(
     }
 
     // ── Send confirmation email to tutor + tutee ─────────────────
-    sendBookingConfirmation({
-      tutorEmail:    req.tutorEmail,
-      tutorName:     req.tutorName,
-      tuteeEmail:    req.tuteeEmail,
-      tuteeName:     req.tuteeName,
-      subject:       req.subject,
-      day:           req.day,
-      startTime:     req.startTime,
-      endTime:       req.endTime,
-      duration:      req.duration,
-      scheduledDate: format(scheduledNoon, "EEEE, MMMM d, yyyy"),
-      meetLink,
-      sessionId:     sessionRef.id,
-    }).catch(err => { captureError(err, { function: "respondToBooking", action: "confirmationEmail" }); console.error("Confirmation email failed:", err); });
+    let emailSent = false;
+    try {
+      await sendBookingConfirmation({
+        tutorEmail:    req.tutorEmail,
+        tutorName:     req.tutorName,
+        tuteeEmail:    req.tuteeEmail,
+        tuteeName:     req.tuteeName,
+        subject:       req.subject,
+        day:           req.day,
+        startTime:     req.startTime,
+        endTime:       req.endTime,
+        duration:      req.duration,
+        scheduledDate: format(scheduledNoon, "EEEE, MMMM d, yyyy"),
+        meetLink,
+        sessionId:     sessionRef.id,
+      });
+      emailSent = true;
+    } catch (err) {
+      captureError(err, { function: "respondToBooking", action: "confirmationEmail" });
+      console.error("Confirmation email failed:", err);
+    }
 
     // ── Send rejection emails to auto-rejected tutees ────────────
     if (siblingRefs.length > 0) {
-      // Re-fetch sibling data for emails
       const siblingDocs = siblingsSnap.docs.filter(d => d.id !== requestId);
       for (const sibDoc of siblingDocs) {
         const sib = sibDoc.data();
@@ -239,6 +252,7 @@ export const respondToBooking = functions.onCall(
       sessionId:     sessionRef.id,
       meetLink,
       meetLinkStatus,
+      emailSent,
     };
   }
 );

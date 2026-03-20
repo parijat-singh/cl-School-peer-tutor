@@ -111,7 +111,7 @@ describe("respondToBooking", () => {
       auth: { uid: "tutor-1" },
       data: { requestId: "r1", action: "reject" },
     });
-    expect(result).toEqual({ success: true });
+    expect(result).toEqual({ success: true, emailSent: true });
     expect(mockReqUpdate).toHaveBeenCalledWith(expect.objectContaining({ status: "rejected" }));
   });
 
