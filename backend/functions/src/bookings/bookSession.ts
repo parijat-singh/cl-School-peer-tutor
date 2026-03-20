@@ -3,35 +3,25 @@
 
 import * as functions from "firebase-functions/v2/https";
 import { z }          from "zod";
-import { db, FieldValue, Timestamp } from "../lib/admin";
+import { db, FieldValue } from "../lib/admin";
 import { provisionMeetLink }         from "../lib/googleMeet";
 import { sendBookingConfirmation }   from "../lib/email";
 import { format }                    from "date-fns";
+import { shouldEnforceAppCheck } from "../lib/runtime";
+import { checkAndConsumeRateLimit } from "../lib/rateLimit";
+import { dateOnlyToNoonUtcDate, dateOnlyToTimestamp } from "../lib/dates";
+import { captureError } from "../lib/sentry";
 
-const schema = z.object({
+export const bookSessionSchema = z.object({
   tutorId:       z.string().min(1),
   slotId:        z.string().min(1),
   subject:       z.string().min(1),
-  scheduledDate: z.string().min(1),
+  scheduledDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "scheduledDate must be YYYY-MM-DD"),
 });
-
-// Rate limit: 10 bookings per minute per user
-const bookingRateLimiter = new Map<string, { count: number; reset: number }>();
-
-function checkRateLimit(uid: string): boolean {
-  const now  = Date.now();
-  const entry = bookingRateLimiter.get(uid);
-  if (!entry || now > entry.reset) {
-    bookingRateLimiter.set(uid, { count: 1, reset: now + 60_000 });
-    return true;
-  }
-  if (entry.count >= 10) return false;
-  entry.count++;
-  return true;
-}
+const schema = bookSessionSchema;
 
 export const bookSession = functions.onCall(
-  { enforceAppCheck: false, region: "us-central1" },
+  { enforceAppCheck: shouldEnforceAppCheck, region: "us-central1" },
   async (request) => {
     // Auth check
     if (!request.auth) {
@@ -39,10 +29,14 @@ export const bookSession = functions.onCall(
     }
 
     const uid    = request.auth.uid;
-    const claims = request.auth.token;
 
     // Rate limiting
-    if (!checkRateLimit(uid)) {
+    const ok = await checkAndConsumeRateLimit({
+      key: `bookSession:${uid}`,
+      limit: 10,
+      windowMs: 60_000,
+    });
+    if (!ok) {
       throw new functions.HttpsError("resource-exhausted", "Too many booking attempts. Wait 1 minute.");
     }
 
@@ -52,6 +46,7 @@ export const bookSession = functions.onCall(
       throw new functions.HttpsError("invalid-argument", "Invalid booking request.");
     }
     const { tutorId, slotId, subject, scheduledDate } = parsed.data;
+    const scheduledNoon = dateOnlyToNoonUtcDate(scheduledDate);
 
     // Verify tutee is active and from the same school
     const tuteeDoc = await db.collection("users").doc(uid).get();
@@ -104,7 +99,7 @@ export const bookSession = functions.onCall(
         startTime:   slot.startTime,
         endTime:     slot.endTime,
         duration:    slot.duration,
-        scheduledDate: Timestamp.fromDate(new Date(scheduledDate)),
+        scheduledDate: dateOnlyToTimestamp(scheduledDate),
         status:        "upcoming",
         meetLink:      null,
         calendarEventId: null,
@@ -143,7 +138,7 @@ export const bookSession = functions.onCall(
         meetLinkStatus:  "ready",
       });
     } catch (err) {
-      // Graceful degradation — log but don't fail the booking
+      captureError(err, { function: "bookSession", action: "meetProvisioning" });
       console.error("Meet provisioning failed:", err);
       meetLinkStatus = "failed";
       await sessionRef.update({ meetLinkStatus: "failed" });
@@ -161,11 +156,12 @@ export const bookSession = functions.onCall(
         startTime:     slotData.startTime,
         endTime:       slotData.endTime,
         duration:      slotData.duration,
-        scheduledDate: format(new Date(scheduledDate), "EEEE, MMMM d, yyyy"),
+        scheduledDate: format(scheduledNoon, "EEEE, MMMM d, yyyy"),
         meetLink,
         sessionId:     sessionRef.id,
       });
     } catch (emailErr) {
+      captureError(emailErr, { function: "bookSession", action: "bookingEmail" });
       console.error("Booking email failed:", emailErr);
       // Don't fail the booking if email fails
     }

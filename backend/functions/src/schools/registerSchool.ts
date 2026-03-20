@@ -5,6 +5,7 @@
 import * as functions from "firebase-functions/v2/https";
 import * as nodemailer from "nodemailer";
 import { db, FieldValue } from "../lib/admin";
+import { captureError } from "../lib/sentry";
 
 export const registerSchool = functions.onCall(
   { region: "us-central1" },
@@ -48,8 +49,7 @@ export const registerSchool = functions.onCall(
       createdAt: FieldValue.serverTimestamp(),
     });
 
-    // Notify ops team
-    const superAdmin = process.env.SUPER_ADMIN_EMAIL ?? "admin@peertutor.app";
+    // Notify all super admins
     try {
       const smtpPort = Number(process.env.SMTP_PORT ?? "465");
       const t = nodemailer.createTransport({
@@ -61,12 +61,13 @@ export const registerSchool = functions.onCall(
       });
       await t.sendMail({
         from:    `"${process.env.SMTP_FROM_NAME ?? "PeerTutor"}" <${process.env.SMTP_FROM_EMAIL ?? ""}>`,
-        to:      superAdmin,
+        to:      process.env.SUPER_ADMIN_EMAIL ?? "",
         subject: `New school registration: ${name} (${domain})`,
         text:    `School: ${name}\nDomain: ${domain}\nType: ${type}\nAdmin: ${adminEmail}\n\nApprove at: https://schoolpeertutor.com/admin/schools/${domain}`,
       });
     } catch (err) {
-      console.error("Ops notification email failed:", err);
+      captureError(err, { function: "registerSchool", action: "superAdminNotificationEmail" });
+      console.error("Super admin notification email failed:", err);
     }
 
     return {

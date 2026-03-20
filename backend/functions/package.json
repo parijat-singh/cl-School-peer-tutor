@@ -3,18 +3,22 @@
   "version": "1.0.0",
   "private": true,
   "engines": {
-    "node": "20"
+    "node": "22"
   },
   "main": "lib/index.js",
   "scripts": {
     "build": "tsc",
     "build:watch": "tsc --watch",
+    "test": "vitest run --exclude \"**/*.integration.test.ts\"",
+    "test:integration": "vitest run src/integration --testTimeout=20000",
+    "test:watch": "vitest",
     "serve": "npm run build && firebase emulators:start --only functions",
     "shell": "npm run build && firebase functions:shell",
     "deploy": "firebase deploy --only functions",
     "logs": "firebase functions:log"
   },
   "dependencies": {
+    "@sentry/node": "^10.44.0",
     "date-fns": "^3.6.0",
     "firebase-admin": "^12.0.0",
     "firebase-functions": "^5.0.0",
@@ -23,9 +27,11 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "@types/node": "^20.12.0",
+    "@types/node": "^22.19.15",
     "@types/nodemailer": "^7.0.11",
+    "@vitest/coverage-v8": "2.1",
     "firebase-functions-test": "^3.1.0",
-    "typescript": "^5.4.5"
+    "typescript": "^5.4.5",
+    "vitest": "^2.1.9"
   }
 }

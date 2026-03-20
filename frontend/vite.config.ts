@@ -1,9 +1,38 @@
+/// <reference types="vitest" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
 
 export default defineConfig({
   plugins: [react()],
+  css: { postcss: {} },
+  test: {
+    css: false,
+    environment: "jsdom",
+    globals: true,
+    pool: "forks",
+    include: ["src/**/*.test.{ts,tsx}"],
+    server: {
+      deps: {
+        inline: [/.*/],
+      },
+    },
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "text-summary", "json-summary"],
+      include: ["src/lib/**/*.{ts,tsx}"],
+      exclude: [
+        "**/*.test.*", "**/*.d.ts", "**/vite-env.d.ts",
+        "src/lib/firebase.ts",
+      ],
+      thresholds: {
+        statements: 80,
+        branches: 80,
+        functions: 80,
+        lines: 80,
+      },
+    },
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

@@ -4,6 +4,7 @@ import { db, FieldValue } from "../lib/admin";
 import { sendCancellationEmail }   from "../lib/email";
 import { deleteCalendarEvent }     from "../lib/googleMeet";
 import { format }                  from "date-fns";
+import { captureError }            from "../lib/sentry";
 
 export const cancelSession = functions.onCall(
   { region: "us-central1" },
@@ -50,6 +51,7 @@ export const cancelSession = functions.onCall(
       try {
         await deleteCalendarEvent(session.calendarEventId);
       } catch (err) {
+        captureError(err, { function: "cancelSession", action: "calendarDelete" });
         console.error("Calendar delete failed:", err);
       }
     }
@@ -76,6 +78,7 @@ export const cancelSession = functions.onCall(
         cancelledBy,
       });
     } catch (err) {
+      captureError(err, { function: "cancelSession", action: "cancellationEmail" });
       console.error("Cancellation email failed:", err);
     }
 

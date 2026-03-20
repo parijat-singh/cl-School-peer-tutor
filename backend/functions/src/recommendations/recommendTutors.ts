@@ -3,6 +3,8 @@
 
 import * as functions from "firebase-functions/v2/https";
 import { db } from "../lib/admin";
+import { shouldEnforceAppCheck } from "../lib/runtime";
+import { captureError } from "../lib/sentry";
 
 interface TutorInput {
   uid: string;
@@ -24,7 +26,7 @@ interface RankedTutor {
 }
 
 export const recommendTutors = functions.onCall(
-  { enforceAppCheck: false, region: "us-central1" },
+  { enforceAppCheck: shouldEnforceAppCheck, region: "us-central1" },
   async (request) => {
     if (!request.auth) {
       throw new functions.HttpsError("unauthenticated", "Sign in required.");
@@ -164,6 +166,7 @@ Score should be 0-100. Order from highest to lowest score. The "reason" should b
 
       if (!response.ok) {
         const errorText = await response.text();
+        captureError(new Error(`Claude API returned ${response.status}: ${errorText}`), { function: "recommendTutors", action: "claudeApiCall" });
         console.error("Claude API error:", response.status, errorText);
         throw new Error(`Claude API returned ${response.status}`);
       }
@@ -197,6 +200,7 @@ Score should be 0-100. Order from highest to lowest score. The "reason" should b
 
       return { ranked: validRanked, aiPowered: true };
     } catch (err) {
+      captureError(err, { function: "recommendTutors", action: "recommendationEngine" });
       console.error("Recommendation engine error:", err);
 
       // Fallback to simple rating sort
