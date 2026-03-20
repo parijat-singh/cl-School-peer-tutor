@@ -7,6 +7,7 @@ import * as functions from "firebase-functions/v2/https";
 import { z }          from "zod";
 import { db, FieldValue, Timestamp } from "../lib/admin";
 import { sendBookingRequestEmail }   from "../lib/email";
+import { shouldEnforceAppCheck } from "../lib/runtime";
 
 export const requestBookingSchema = z.object({
   tutorId:       z.string().min(1),
@@ -17,7 +18,7 @@ export const requestBookingSchema = z.object({
 const schema = requestBookingSchema;
 
 export const requestBooking = functions.onCall(
-  { enforceAppCheck: false, region: "us-central1" },
+  { enforceAppCheck: shouldEnforceAppCheck, region: "us-central1" },
   async (request) => {
     if (!request.auth) {
       throw new functions.HttpsError("unauthenticated", "Sign in to request a session.");

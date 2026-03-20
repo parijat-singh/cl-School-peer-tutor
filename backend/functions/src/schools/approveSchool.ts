@@ -1,11 +1,30 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
-import { getFirestore } from "firebase-admin/firestore";
+import { getFirestore, FieldValue } from "firebase-admin/firestore";
 
 export const approveSchool = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in required");
+
+  if (request.auth.token.role !== "superadmin") {
+    throw new HttpsError("permission-denied", "Only super admins can approve schools.");
+  }
+
   const { domain } = request.data;
   if (!domain) throw new HttpsError("invalid-argument", "domain required");
+
   const db = getFirestore();
-  await db.doc(`schools/${domain}`).update({ approved: true, status: "approved" });
+  const schoolRef = db.doc(`schools/${domain}`);
+  const snap = await schoolRef.get();
+  if (!snap.exists) throw new HttpsError("not-found", "School not found.");
+
+  await schoolRef.update({ approved: true, status: "approved" });
+
+  await db.collection("adminAuditLog").add({
+    adminUid: request.auth.uid,
+    action: "approve_school",
+    targetId: domain,
+    metadata: { schoolName: snap.data()?.name },
+    timestamp: FieldValue.serverTimestamp(),
+  });
+
   return { success: true };
 });

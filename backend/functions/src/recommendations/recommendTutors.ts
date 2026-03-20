@@ -3,6 +3,7 @@
 
 import * as functions from "firebase-functions/v2/https";
 import { db } from "../lib/admin";
+import { shouldEnforceAppCheck } from "../lib/runtime";
 
 interface TutorInput {
   uid: string;
@@ -24,7 +25,7 @@ interface RankedTutor {
 }
 
 export const recommendTutors = functions.onCall(
-  { enforceAppCheck: false, region: "us-central1" },
+  { enforceAppCheck: shouldEnforceAppCheck, region: "us-central1" },
   async (request) => {
     if (!request.auth) {
       throw new functions.HttpsError("unauthenticated", "Sign in required.");

@@ -5,6 +5,7 @@
 import * as functions from "firebase-functions/v2/https";
 import { z }          from "zod";
 import { db, FieldValue } from "../lib/admin";
+import { shouldEnforceAppCheck } from "../lib/runtime";
 
 export const cancelBookingRequestSchema = z.object({
   requestId: z.string().min(1),
@@ -12,7 +13,7 @@ export const cancelBookingRequestSchema = z.object({
 const schema = cancelBookingRequestSchema;
 
 export const cancelBookingRequest = functions.onCall(
-  { enforceAppCheck: false, region: "us-central1" },
+  { enforceAppCheck: shouldEnforceAppCheck, region: "us-central1" },
   async (request) => {
     if (!request.auth) {
       throw new functions.HttpsError("unauthenticated", "Sign in to cancel a request.");

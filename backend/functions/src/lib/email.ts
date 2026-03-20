@@ -367,7 +367,7 @@ export async function sendBookingRequestEmail(params: {
   duration:      number;
   requestId:     string;
 }) {
-  const dateLabel = new Date(params.scheduledDate + "T12:00:00").toLocaleDateString("en-US", {
+  const dateLabel = new Date(params.scheduledDate + "T12:00:00.000Z").toLocaleDateString("en-US", {
     weekday: "long", year: "numeric", month: "long", day: "numeric",
   });
 
@@ -418,7 +418,7 @@ export async function sendRequestRejectedEmail(params: {
   endTime:       string;
   reason:        "slot_taken" | "tutor_declined" | string;
 }) {
-  const dateLabel = new Date(params.scheduledDate + "T12:00:00").toLocaleDateString("en-US", {
+  const dateLabel = new Date(params.scheduledDate + "T12:00:00.000Z").toLocaleDateString("en-US", {
     weekday: "long", year: "numeric", month: "long", day: "numeric",
   });
 

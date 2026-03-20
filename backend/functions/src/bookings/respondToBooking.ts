@@ -17,6 +17,8 @@ import { db, FieldValue, Timestamp } from "../lib/admin";
 import { provisionMeetLink }         from "../lib/googleMeet";
 import { sendBookingConfirmation, sendRequestRejectedEmail } from "../lib/email";
 import { format } from "date-fns";
+import { shouldEnforceAppCheck } from "../lib/runtime";
+import { dateOnlyToNoonUtcDate, dateOnlyToTimestamp } from "../lib/dates";
 
 export const respondToBookingSchema = z.object({
   requestId:       z.string().min(1),
@@ -26,7 +28,7 @@ export const respondToBookingSchema = z.object({
 const schema = respondToBookingSchema;
 
 export const respondToBooking = functions.onCall(
-  { enforceAppCheck: false, region: "us-central1" },
+  { enforceAppCheck: shouldEnforceAppCheck, region: "us-central1" },
   async (request) => {
     if (!request.auth) {
       throw new functions.HttpsError("unauthenticated", "Sign in to respond to a booking request.");
@@ -48,6 +50,7 @@ export const respondToBooking = functions.onCall(
     }
 
     const req = reqSnap.data()!;
+    const scheduledNoon = dateOnlyToNoonUtcDate(req.scheduledDate);
 
     // Only the tutor on this request can respond
     if (req.tutorId !== uid) {
@@ -135,7 +138,7 @@ export const respondToBooking = functions.onCall(
         startTime:     req.startTime,
         endTime:       req.endTime,
         duration:      req.duration,
-        scheduledDate: Timestamp.fromDate(new Date(req.scheduledDate + "T12:00:00")),
+        scheduledDate: dateOnlyToTimestamp(req.scheduledDate),
         status:        "upcoming",
         meetLink:      null,
         calendarEventId: null,
@@ -205,7 +208,7 @@ export const respondToBooking = functions.onCall(
       startTime:     req.startTime,
       endTime:       req.endTime,
       duration:      req.duration,
-      scheduledDate: format(new Date(req.scheduledDate + "T12:00:00"), "EEEE, MMMM d, yyyy"),
+      scheduledDate: format(scheduledNoon, "EEEE, MMMM d, yyyy"),
       meetLink,
       sessionId:     sessionRef.id,
     }).catch(err => console.error("Confirmation email failed:", err));
