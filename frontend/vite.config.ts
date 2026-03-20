@@ -8,15 +8,9 @@ export default defineConfig({
   css: { postcss: {} },
   test: {
     css: false,
-    environment: "jsdom",
+    environment: "node",
     globals: true,
-    pool: "forks",
     include: ["src/**/*.test.{ts,tsx}"],
-    server: {
-      deps: {
-        inline: [/.*/],
-      },
-    },
     coverage: {
       provider: "v8",
       reporter: ["text", "text-summary", "json-summary"],
