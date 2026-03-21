@@ -2,12 +2,14 @@
 import * as functions from "firebase-functions/v2/https";
 import { db, auth, FieldValue, Timestamp } from "../lib/admin";
 import { addDays }    from "date-fns";
+import { requireAuth } from "../lib/cognitoAuth";
+import { cognitoDisableUser, cognitoEnableUser, cognitoUpdateAttributes } from "../lib/cognitoAdmin";
 
 export const adminSuspendUser = functions.onCall(
   { region: "us-central1" },
   async (request) => {
-    if (!request.auth) throw new functions.HttpsError("unauthenticated", "Sign in required.");
-    const callerRole = request.auth.token.role;
+    const caller = await requireAuth(request);
+    const callerRole = caller.token.role;
     if (!["schooladmin", "superadmin"].includes(callerRole)) {
       throw new functions.HttpsError("permission-denied", "Admins only.");
     }
@@ -28,7 +30,7 @@ export const adminSuspendUser = functions.onCall(
 
     const target = targetSnap.data()!;
     // School admins can only act within their school; super admins have cross-school access
-    if (callerRole === "schooladmin" && target.schoolDomain !== request.auth.token.schoolDomain) {
+    if (callerRole === "schooladmin" && target.schoolDomain !== caller.token.schoolDomain) {
       throw new functions.HttpsError("permission-denied", "Cross-school action denied.");
     }
 
@@ -45,7 +47,7 @@ export const adminSuspendUser = functions.onCall(
 
       // Write audit log
       txn.set(db.collection("adminAuditLog").doc(), {
-        adminUid:    request.auth!.uid,
+        adminUid:    caller.uid,
         action:      "suspend_user",
         targetId:    targetUid,
         reason,
@@ -55,13 +57,12 @@ export const adminSuspendUser = functions.onCall(
       });
     });
 
-    // Disable Firebase Auth account and sync claims
+    // Disable auth accounts (Firebase + Cognito)
     await auth.updateUser(targetUid, { disabled: true });
-    await auth.setCustomUserClaims(targetUid, {
-      role: target.role,
-      schoolDomain: target.schoolDomain,
-      status: "suspended",
-    });
+    try { await cognitoDisableUser(targetUid); } catch { /* Cognito user may not exist yet */ }
+    try {
+      await cognitoUpdateAttributes(targetUid, { "custom:status": "suspended" });
+    } catch { /* ignore if Cognito user doesn't exist */ }
 
     // Cancel all upcoming sessions for this user
     const upcomingSessions = await db.collection("sessions")
@@ -89,8 +90,8 @@ export const adminSuspendUser = functions.onCall(
 export const adminUnsuspendUser = functions.onCall(
   { region: "us-central1" },
   async (request) => {
-    if (!request.auth) throw new functions.HttpsError("unauthenticated", "Sign in required.");
-    const callerRole = request.auth.token.role;
+    const caller = await requireAuth(request);
+    const callerRole = caller.token.role;
     if (!["schooladmin", "superadmin"].includes(callerRole)) {
       throw new functions.HttpsError("permission-denied", "Admins only.");
     }
@@ -101,7 +102,7 @@ export const adminUnsuspendUser = functions.onCall(
     if (!targetSnap.exists) throw new functions.HttpsError("not-found", "User not found.");
 
     const target = targetSnap.data()!;
-    if (callerRole === "schooladmin" && target.schoolDomain !== request.auth.token.schoolDomain) {
+    if (callerRole === "schooladmin" && target.schoolDomain !== caller.token.schoolDomain) {
       throw new functions.HttpsError("permission-denied", "Cross-school action denied.");
     }
 
@@ -112,7 +113,7 @@ export const adminUnsuspendUser = functions.onCall(
         updatedAt:     FieldValue.serverTimestamp(),
       });
       txn.set(db.collection("adminAuditLog").doc(), {
-        adminUid:    request.auth!.uid,
+        adminUid:    caller.uid,
         action:      "unsuspend_user",
         targetId:    targetUid,
         schoolDomain: target.schoolDomain,
@@ -121,11 +122,10 @@ export const adminUnsuspendUser = functions.onCall(
     });
 
     await auth.updateUser(targetUid, { disabled: false });
-    await auth.setCustomUserClaims(targetUid, {
-      role: target.role,
-      schoolDomain: target.schoolDomain,
-      status: "active",
-    });
+    try { await cognitoEnableUser(targetUid); } catch { /* Cognito user may not exist yet */ }
+    try {
+      await cognitoUpdateAttributes(targetUid, { "custom:status": "active" });
+    } catch { /* ignore if Cognito user doesn't exist */ }
     return { success: true };
   }
 );

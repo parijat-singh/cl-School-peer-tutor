@@ -6,6 +6,7 @@ import { z } from "zod";
 import { db } from "../lib/admin";
 import { shouldEnforceAppCheck } from "../lib/runtime";
 import { captureError } from "../lib/sentry";
+import { requireAuth } from "../lib/cognitoAuth";
 
 const rankedTutorSchema = z.array(z.object({
   uid:    z.string(),
@@ -35,9 +36,7 @@ interface RankedTutor {
 export const recommendTutors = functions.onCall(
   { enforceAppCheck: shouldEnforceAppCheck, region: "us-central1" },
   async (request) => {
-    if (!request.auth) {
-      throw new functions.HttpsError("unauthenticated", "Sign in required.");
-    }
+    await requireAuth(request);
 
     const { tutors, searchSubject, searchDate, searchDay } = request.data as {
       tutors: TutorInput[];
@@ -138,6 +137,7 @@ Score should be 0-100. Order from highest to lowest score. The "reason" should b
 
     if (!apiKey) {
       // Fallback: sort by rating if no API key configured
+      console.warn("ANTHROPIC_API_KEY not set — falling back to rating-based sort");
       const ranked = tutors
         .sort((a, b) => {
           // Sort by weighted score: rating * log(reviewCount+1) + slotCount bonus
@@ -174,15 +174,11 @@ Score should be 0-100. Order from highest to lowest score. The "reason" should b
       if (!response.ok) {
         const errorText = await response.text();
         captureError(new Error(`Claude API returned ${response.status}: ${errorText}`), { function: "recommendTutors", action: "claudeApiCall" });
+        console.error("Claude API error:", response.status, errorText);
         throw new Error(`Claude API returned ${response.status}`);
       }
 
-      const claudeResponseSchema = z.object({
-        content: z.array(z.object({ text: z.string() })).optional(),
-      });
-      const parsed = claudeResponseSchema.safeParse(await response.json());
-      if (!parsed.success) throw new Error("Claude API response schema mismatch");
-      const result = parsed.data;
+      const result = await response.json() as { content?: { text?: string }[] };
       const text = result.content?.[0]?.text ?? "";
 
       // Parse the JSON from Claude's response
@@ -216,6 +212,7 @@ Score should be 0-100. Order from highest to lowest score. The "reason" should b
       return { ranked: validRanked, aiPowered: true };
     } catch (err) {
       captureError(err, { function: "recommendTutors", action: "recommendationEngine" });
+      console.error("Recommendation engine error:", err);
 
       // Fallback to simple rating sort
       const ranked = tutors

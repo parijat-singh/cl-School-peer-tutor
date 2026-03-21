@@ -5,11 +5,12 @@ import { sendCancellationEmail }   from "../lib/email";
 import { deleteCalendarEvent }     from "../lib/googleMeet";
 import { format }                  from "date-fns";
 import { captureError }            from "../lib/sentry";
+import { requireAuth }             from "../lib/cognitoAuth";
 
 export const cancelSession = functions.onCall(
   { region: "us-central1" },
   async (request) => {
-    if (!request.auth) throw new functions.HttpsError("unauthenticated", "Sign in required.");
+    const caller = await requireAuth(request);
 
     const { sessionId, reason } = request.data as { sessionId: string; reason?: string };
     if (!sessionId) throw new functions.HttpsError("invalid-argument", "sessionId required.");
@@ -20,7 +21,7 @@ export const cancelSession = functions.onCall(
     if (!sessionSnap.exists) throw new functions.HttpsError("not-found", "Session not found.");
 
     const session    = sessionSnap.data()!;
-    const callerUid  = request.auth.uid;
+    const callerUid  = caller.uid;
 
     // Only tutor or tutee can cancel
     if (session.tutorId !== callerUid && session.tuteeId !== callerUid) {

@@ -20,6 +20,7 @@ import { format } from "date-fns";
 import { shouldEnforceAppCheck } from "../lib/runtime";
 import { dateOnlyToNoonUtcDate, dateOnlyToTimestamp } from "../lib/dates";
 import { captureError } from "../lib/sentry";
+import { requireAuth } from "../lib/cognitoAuth";
 
 export const respondToBookingSchema = z.object({
   requestId:       z.string().min(1),
@@ -31,11 +32,8 @@ const schema = respondToBookingSchema;
 export const respondToBooking = functions.onCall(
   { enforceAppCheck: shouldEnforceAppCheck, region: "us-central1" },
   async (request) => {
-    if (!request.auth) {
-      throw new functions.HttpsError("unauthenticated", "Sign in to respond to a booking request.");
-    }
-
-    const uid    = request.auth.uid;
+    const caller = await requireAuth(request);
+    const uid    = caller.uid;
     const parsed = schema.safeParse(request.data);
 
     if (!parsed.success) {
@@ -232,28 +230,19 @@ export const respondToBooking = functions.onCall(
     // ── Send rejection emails to auto-rejected tutees ────────────
     if (siblingRefs.length > 0) {
       const siblingDocs = siblingsSnap.docs.filter(d => d.id !== requestId);
-      const results = await Promise.allSettled(
-        siblingDocs.map((sibDoc) => {
-          const sib = sibDoc.data();
-          return sendRequestRejectedEmail({
-            tuteeEmail:    sib.tuteeEmail,
-            tuteeName:     sib.tuteeName,
-            tutorName:     sib.tutorName,
-            subject:       sib.subject,
-            scheduledDate: sib.scheduledDate,
-            day:           sib.day,
-            startTime:     sib.startTime,
-            endTime:       sib.endTime,
-            reason:        "slot_taken",
-          });
-        })
-      );
-      const failed = results.filter((r) => r.status === "rejected");
-      if (failed.length > 0) {
-        captureError(
-          new Error(`${failed.length}/${siblingDocs.length} auto-rejection emails failed`),
-          { function: "respondToBooking", action: "autoRejectionEmails" }
-        );
+      for (const sibDoc of siblingDocs) {
+        const sib = sibDoc.data();
+        sendRequestRejectedEmail({
+          tuteeEmail:    sib.tuteeEmail,
+          tuteeName:     sib.tuteeName,
+          tutorName:     sib.tutorName,
+          subject:       sib.subject,
+          scheduledDate: sib.scheduledDate,
+          day:           sib.day,
+          startTime:     sib.startTime,
+          endTime:       sib.endTime,
+          reason:        "slot_taken",
+        }).catch(err => { captureError(err, { function: "respondToBooking", action: "autoRejectionEmail" }); console.error("Auto-rejection email failed:", err); });
       }
     }
 

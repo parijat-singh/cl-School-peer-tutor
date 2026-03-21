@@ -4,9 +4,9 @@ import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useAuth } from "@/lib/auth-context";
+import { useAuth, extractDomain } from "@/lib/auth-context";
 import { Button, Input, Select } from "@/components/shared/ui";
-import { BookOpen, AlertCircle, CheckCircle, Mail } from "lucide-react";
+import { BookOpen, AlertCircle, Mail } from "lucide-react";
 import type { GradeLevel, UserRole } from "@/lib/types";
 
 // ── Schemas ──────────────────────────────────────────────────────
@@ -37,9 +37,21 @@ const resetSchema = z.object({
   email: z.string().email("Enter a valid email"),
 });
 
+const confirmResetSchema = z.object({
+  code:            z.string().min(6, "Enter the 6-digit code"),
+  newPassword:     z.string().min(8, "Password must be at least 8 characters")
+                     .regex(/[A-Z]/, "Must contain an uppercase letter")
+                     .regex(/[0-9]/, "Must contain a number"),
+  confirmPassword: z.string().min(1, "Confirm your password"),
+}).refine((data) => data.newPassword === data.confirmPassword, {
+  message: "Passwords do not match",
+  path: ["confirmPassword"],
+});
+
 type SignInForm = z.infer<typeof signInSchema>;
 type SignUpForm = z.infer<typeof signUpSchema>;
 type ResetForm  = z.infer<typeof resetSchema>;
+type ConfirmResetForm = z.infer<typeof confirmResetSchema>;
 
 const GRADES: { value: GradeLevel; label: string }[] = [
   { value: "6th",  label: "6th Grade"  },
@@ -50,6 +62,35 @@ const GRADES: { value: GradeLevel; label: string }[] = [
   { value: "11th", label: "11th Grade" },
   { value: "12th", label: "12th Grade" },
 ];
+
+// ── Cognito error mapping ────────────────────────────────────────
+
+function mapAuthError(err: unknown): string {
+  const name = (err as { name?: string }).name ?? "";
+  const message = (err as { message?: string }).message ?? "";
+  const code = (err as { code?: string }).code ?? "";
+
+  // Cognito errors
+  if (name === "NotAuthorizedException") return "Incorrect email or password.";
+  if (name === "UserNotFoundException") return "Incorrect email or password.";
+  if (name === "UserNotConfirmedException") return "Please verify your email first.";
+  if (name === "UsernameExistsException") return "An account with this email already exists.";
+  if (name === "CodeMismatchException") return "Invalid verification code.";
+  if (name === "ExpiredCodeException") return "Code has expired. Please request a new one.";
+  if (name === "LimitExceededException") return "Too many attempts. Please try again later.";
+  if (name === "InvalidPasswordException") return "Password does not meet requirements.";
+
+  // Firebase errors (legacy fallback)
+  if (code === "auth/user-not-found" || code === "auth/wrong-password" || code === "auth/invalid-credential") {
+    return "Incorrect email or password.";
+  }
+  if (code === "auth/email-already-in-use") return "An account with this email already exists.";
+
+  // App-level errors
+  if (message.includes("school") || message.includes("pending") || message.includes("approved")) return message;
+
+  return "Something went wrong. Please try again.";
+}
 
 // ── OTP Input ────────────────────────────────────────────────────
 
@@ -112,20 +153,31 @@ export default function AuthPage() {
   const initMode = params.get("mode") === "signup" ? "signup"
     : params.get("mode") === "reset" ? "reset"
     : "signin";
-  const [mode, setMode] = useState<"signin" | "signup" | "verify" | "reset">(initMode);
+  const [mode, setMode] = useState<"signin" | "signup" | "verify" | "reset" | "confirmReset">(initMode);
   const [serverError, setServerError]     = useState("");
   const [verifyEmail, setVerifyEmail]     = useState("");
-  const [resetSent, setResetSent]         = useState(false);
+  const [resetEmail, setResetEmail]       = useState("");
   const [verifyLoading, setVerifyLoading] = useState(false);
   const [resendLoading, setResendLoading] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
 
-  const { signIn, signUp, resetPassword, sendVerificationOtp, verifyOtp } = useAuth();
+  // Store signup data for use after verification
+  const [pendingSignUp, setPendingSignUp] = useState<{
+    email: string;
+    password: string;
+    name: string;
+    role: UserRole;
+    grade: GradeLevel | null;
+    schoolDomain: string;
+  } | null>(null);
+
+  const { signIn, signUp, confirmSignUp, resetPassword, confirmResetPassword, resendCode } = useAuth();
   const navigate = useNavigate();
 
   const signInForm = useForm<SignInForm>({ resolver: zodResolver(signInSchema) });
   const signUpForm = useForm<SignUpForm>({ resolver: zodResolver(signUpSchema) });
   const resetForm  = useForm<ResetForm>({ resolver: zodResolver(resetSchema) });
+  const confirmResetForm = useForm<ConfirmResetForm>({ resolver: zodResolver(confirmResetSchema) });
 
   // Countdown timer for resend button
   useEffect(() => {
@@ -140,18 +192,16 @@ export default function AuthPage() {
       await signIn(data.email, data.password);
       navigate("/dashboard");
     } catch (err: unknown) {
-      const code = (err as { code?: string }).code;
-      setServerError(
-        code === "auth/user-not-found" || code === "auth/wrong-password" || code === "auth/invalid-credential"
-          ? "Incorrect email or password."
-          : "Sign in failed. Please try again."
-      );
+      setServerError(mapAuthError(err));
     }
   });
 
   const handleSignUp = signUpForm.handleSubmit(async (data) => {
     setServerError("");
     try {
+      const domain = extractDomain(data.email);
+      if (!domain) throw new Error("Enter a valid email address.");
+
       await signUp({
         email:    data.email,
         password: data.password,
@@ -159,42 +209,57 @@ export default function AuthPage() {
         grade:    data.role === "teacher" ? null : (data.grade as GradeLevel),
         role:     data.role as UserRole,
       });
-      await sendVerificationOtp();
+
+      // Store signup data for after verification
+      setPendingSignUp({
+        email: data.email,
+        password: data.password,
+        name: data.name,
+        role: data.role as UserRole,
+        grade: data.role === "teacher" ? null : (data.grade as GradeLevel),
+        schoolDomain: domain,
+      });
+
       setVerifyEmail(data.email);
       setResendCooldown(60);
       setMode("verify");
     } catch (err: unknown) {
-      const msg = (err as Error).message ?? "";
-      setServerError(
-        msg.includes("email-already-in-use")
-          ? "An account with this email already exists."
-          : msg.includes("school") || msg.includes("pending")
-          ? msg
-          : "Sign up failed. Please try again."
-      );
+      setServerError(mapAuthError(err));
     }
   });
 
-  const handleVerifyOtp = async (otp: string) => {
+  const handleVerifyCode = async (code: string) => {
     setServerError("");
     setVerifyLoading(true);
     try {
-      await verifyOtp(otp);
+      if (!pendingSignUp) throw new Error("Sign up data lost. Please sign up again.");
+
+      // Confirm Cognito signup
+      await confirmSignUp(verifyEmail, code, {
+        name: pendingSignUp.name,
+        role: pendingSignUp.role,
+        schoolDomain: pendingSignUp.schoolDomain,
+        grade: pendingSignUp.grade,
+      });
+
+      // Auto sign in after confirmation
+      await signIn(pendingSignUp.email, pendingSignUp.password);
+      setPendingSignUp(null);
       navigate("/dashboard");
     } catch (err: unknown) {
-      setServerError((err as { message?: string }).message ?? "Verification failed.");
+      setServerError(mapAuthError(err));
       setVerifyLoading(false);
     }
   };
 
-  const handleResendOtp = async () => {
+  const handleResendCode = async () => {
     setServerError("");
     setResendLoading(true);
     try {
-      await sendVerificationOtp();
+      await resendCode(verifyEmail);
       setResendCooldown(60);
     } catch (err: unknown) {
-      setServerError((err as { message?: string }).message ?? "Failed to resend code.");
+      setServerError(mapAuthError(err));
     } finally {
       setResendLoading(false);
     }
@@ -204,9 +269,21 @@ export default function AuthPage() {
     setServerError("");
     try {
       await resetPassword(data.email);
-      setResetSent(true);
+      setResetEmail(data.email);
+      
+      setMode("confirmReset");
     } catch {
-      setServerError("Couldn't send reset email. Check the address and try again.");
+      setServerError("Couldn't send reset code. Check the address and try again.");
+    }
+  });
+
+  const handleConfirmReset = confirmResetForm.handleSubmit(async (data) => {
+    setServerError("");
+    try {
+      await confirmResetPassword(resetEmail, data.code, data.newPassword);
+      setMode("signin");
+    } catch (err: unknown) {
+      setServerError(mapAuthError(err));
     }
   });
 
@@ -251,7 +328,7 @@ export default function AuthPage() {
       <div className="flex-1 flex items-center justify-center px-6 py-10">
         <div className="w-full max-w-md">
 
-          {/* ── Verify OTP ── */}
+          {/* ── Verify Code ── */}
           {mode === "verify" && (
             <div className="flex flex-col gap-6">
               <div className="text-center">
@@ -273,7 +350,7 @@ export default function AuthPage() {
                 </div>
               )}
 
-              <OtpInput onComplete={handleVerifyOtp} />
+              <OtpInput onComplete={handleVerifyCode} />
 
               {verifyLoading && (
                 <p className="text-center text-sm text-gray-500">Verifying…</p>
@@ -285,7 +362,7 @@ export default function AuthPage() {
                   <span className="text-gray-400">Resend in {resendCooldown}s</span>
                 ) : (
                   <button
-                    onClick={handleResendOtp}
+                    onClick={handleResendCode}
                     disabled={resendLoading}
                     className="text-brand-600 hover:underline disabled:opacity-50"
                   >
@@ -303,64 +380,107 @@ export default function AuthPage() {
             </div>
           )}
 
-          {/* ── Forgot Password ── */}
+          {/* ── Confirm Password Reset ── */}
+          {mode === "confirmReset" && (
+            <div className="flex flex-col gap-5">
+              <div>
+                <h1 className="font-display text-2xl text-gray-900 mb-1">Reset your password</h1>
+                <p className="text-sm text-gray-500">
+                  We sent a verification code to <strong>{resetEmail}</strong>.
+                  Enter the code and your new password.
+                </p>
+              </div>
+
+              {serverError && (
+                <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded p-3 text-sm text-red-700">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                  {serverError}
+                </div>
+              )}
+
+              <form onSubmit={handleConfirmReset} className="flex flex-col gap-4" noValidate>
+                <Input
+                  label="Verification Code"
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="123456"
+                  error={confirmResetForm.formState.errors.code?.message}
+                  {...confirmResetForm.register("code")}
+                />
+                <Input
+                  label="New Password"
+                  type="password"
+                  placeholder="••••••••"
+                  hint="Min 8 chars, one uppercase, one number"
+                  error={confirmResetForm.formState.errors.newPassword?.message}
+                  {...confirmResetForm.register("newPassword")}
+                />
+                <Input
+                  label="Confirm Password"
+                  type="password"
+                  placeholder="••••••••"
+                  error={confirmResetForm.formState.errors.confirmPassword?.message}
+                  {...confirmResetForm.register("confirmPassword")}
+                />
+                <Button
+                  type="submit"
+                  size="lg"
+                  className="w-full"
+                  loading={confirmResetForm.formState.isSubmitting}
+                >
+                  Reset password
+                </Button>
+                <button
+                  type="button"
+                  onClick={() => { setMode("signin"); setServerError(""); }}
+                  className="text-sm text-gray-400 hover:text-gray-600 text-center hover:underline"
+                >
+                  Back to sign in
+                </button>
+              </form>
+            </div>
+          )}
+
+          {/* ── Forgot Password (Step 1: enter email) ── */}
           {mode === "reset" && (
             <div className="flex flex-col gap-5">
               <div>
                 <h1 className="font-display text-2xl text-gray-900 mb-1">Reset your password</h1>
                 <p className="text-sm text-gray-500">
-                  Enter your school email and we'll send you a secure reset link.
+                  Enter your school email and we'll send you a verification code.
                 </p>
               </div>
 
-              {resetSent ? (
-                <div className="flex flex-col items-center gap-4 py-6 text-center">
-                  <CheckCircle className="w-12 h-12 text-green-500" />
-                  <div>
-                    <p className="font-medium text-gray-900 mb-1">Reset link sent</p>
-                    <p className="text-sm text-gray-500">
-                      Check your inbox. The link expires in 1 hour.
-                    </p>
+              <form onSubmit={handleResetPassword} className="flex flex-col gap-4" noValidate>
+                {serverError && (
+                  <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded p-3 text-sm text-red-700">
+                    <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                    {serverError}
                   </div>
-                  <button
-                    onClick={() => { setMode("signin"); setResetSent(false); resetForm.reset(); }}
-                    className="text-sm text-brand-600 hover:underline"
-                  >
-                    Back to sign in
-                  </button>
-                </div>
-              ) : (
-                <form onSubmit={handleResetPassword} className="flex flex-col gap-4" noValidate>
-                  {serverError && (
-                    <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded p-3 text-sm text-red-700">
-                      <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                      {serverError}
-                    </div>
-                  )}
-                  <Input
-                    label="School Email"
-                    type="email"
-                    placeholder="you@yourschool.com"
-                    error={resetForm.formState.errors.email?.message}
-                    {...resetForm.register("email")}
-                  />
-                  <Button
-                    type="submit"
-                    size="lg"
-                    className="w-full"
-                    loading={resetForm.formState.isSubmitting}
-                  >
-                    Send reset link
-                  </Button>
-                  <button
-                    type="button"
-                    onClick={() => { setMode("signin"); setServerError(""); }}
-                    className="text-sm text-gray-400 hover:text-gray-600 text-center hover:underline"
-                  >
-                    Back to sign in
-                  </button>
-                </form>
-              )}
+                )}
+                <Input
+                  label="School Email"
+                  type="email"
+                  placeholder="you@yourschool.com"
+                  error={resetForm.formState.errors.email?.message}
+                  {...resetForm.register("email")}
+                />
+                <Button
+                  type="submit"
+                  size="lg"
+                  className="w-full"
+                  loading={resetForm.formState.isSubmitting}
+                >
+                  Send reset code
+                </Button>
+                <button
+                  type="button"
+                  onClick={() => { setMode("signin"); setServerError(""); }}
+                  className="text-sm text-gray-400 hover:text-gray-600 text-center hover:underline"
+                >
+                  Back to sign in
+                </button>
+              </form>
             </div>
           )}
 

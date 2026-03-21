@@ -29,6 +29,22 @@ vi.mock("./firestore", () => ({
   getUserDoc: vi.fn().mockResolvedValue(null),
 }));
 
+vi.mock("./cognito-auth", () => ({
+  cognitoSignUp: vi.fn(),
+  cognitoConfirmSignUp: vi.fn(),
+  cognitoSignIn: vi.fn(),
+  cognitoSignOut: vi.fn(),
+  cognitoRefreshTokens: vi.fn(),
+  cognitoForgotPassword: vi.fn(),
+  cognitoConfirmForgotPassword: vi.fn(),
+  cognitoResendConfirmationCode: vi.fn(),
+  decodeIdToken: vi.fn(),
+}));
+
+vi.mock("./callable", () => ({
+  callFunction: vi.fn(),
+}));
+
 import { extractDomain } from "./auth-context";
 
 describe("extractDomain", () => {

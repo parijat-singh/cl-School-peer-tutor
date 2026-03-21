@@ -39,3 +39,34 @@ output "waf_web_acl_arn" {
   description = "WAF ACL attached to CloudFront when enable_waf=true"
   value       = var.enable_waf ? aws_wafv2_web_acl.frontend[0].arn : null
 }
+
+# ── Cognito ──────────────────────────────────────────────────────────────────
+output "cognito_user_pool_id" {
+  description = "Cognito User Pool ID (set as VITE_COGNITO_USER_POOL_ID and COGNITO_USER_POOL_ID)"
+  value       = aws_cognito_user_pool.main.id
+}
+
+output "cognito_user_pool_arn" {
+  description = "Cognito User Pool ARN"
+  value       = aws_cognito_user_pool.main.arn
+}
+
+output "cognito_app_client_id" {
+  description = "Cognito App Client ID (set as VITE_COGNITO_CLIENT_ID and COGNITO_APP_CLIENT_ID)"
+  value       = aws_cognito_user_pool_client.spa.id
+}
+
+output "cognito_jwks_uri" {
+  description = "JWKS URI for backend JWT verification"
+  value       = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.main.id}/.well-known/jwks.json"
+}
+
+output "cognito_issuer" {
+  description = "Cognito token issuer URL"
+  value       = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.main.id}"
+}
+
+output "cognito_backend_iam_user_name" {
+  description = "IAM user for backend Cognito admin ops — create access key and add to Firebase env"
+  value       = aws_iam_user.cognito_backend.name
+}

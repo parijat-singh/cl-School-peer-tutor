@@ -9,6 +9,7 @@ import { db, FieldValue, Timestamp } from "../lib/admin";
 import { sendBookingRequestEmail }   from "../lib/email";
 import { shouldEnforceAppCheck } from "../lib/runtime";
 import { captureError } from "../lib/sentry";
+import { requireAuth } from "../lib/cognitoAuth";
 
 export const requestBookingSchema = z.object({
   tutorId:       z.string().min(1),
@@ -21,11 +22,8 @@ const schema = requestBookingSchema;
 export const requestBooking = functions.onCall(
   { enforceAppCheck: shouldEnforceAppCheck, region: "us-central1" },
   async (request) => {
-    if (!request.auth) {
-      throw new functions.HttpsError("unauthenticated", "Sign in to request a session.");
-    }
-
-    const uid = request.auth.uid;
+    const caller = await requireAuth(request);
+    const uid = caller.uid;
 
     const parsed = schema.safeParse(request.data);
     if (!parsed.success) {
