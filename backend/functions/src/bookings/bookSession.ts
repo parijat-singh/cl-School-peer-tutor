@@ -11,6 +11,7 @@ import { shouldEnforceAppCheck } from "../lib/runtime";
 import { checkAndConsumeRateLimit } from "../lib/rateLimit";
 import { dateOnlyToNoonUtcDate, dateOnlyToTimestamp } from "../lib/dates";
 import { captureError } from "../lib/sentry";
+import { requireAuth } from "../lib/cognitoAuth";
 
 export const bookSessionSchema = z.object({
   tutorId:       z.string().min(1),
@@ -23,12 +24,9 @@ const schema = bookSessionSchema;
 export const bookSession = functions.onCall(
   { enforceAppCheck: shouldEnforceAppCheck, region: "us-central1" },
   async (request) => {
-    // Auth check
-    if (!request.auth) {
-      throw new functions.HttpsError("unauthenticated", "Sign in to book a session.");
-    }
-
-    const uid    = request.auth.uid;
+    // Auth check (dual-mode: Firebase or Cognito)
+    const caller = await requireAuth(request);
+    const uid    = caller.uid;
 
     // Rate limiting
     const ok = await checkAndConsumeRateLimit({

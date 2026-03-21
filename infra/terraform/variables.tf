@@ -60,6 +60,18 @@ variable "s3_version_lifecycle_days" {
   default     = 30
 }
 
+variable "cognito_ses_email_arn" {
+  description = "SES verified identity ARN for Cognito emails. Leave empty to use Cognito default email."
+  type        = string
+  default     = ""
+}
+
+variable "cognito_from_email" {
+  description = "From email address for Cognito emails (only used when cognito_ses_email_arn is set)"
+  type        = string
+  default     = "noreply@schoolpeertutor.com"
+}
+
 variable "tags" {
   description = "Tags applied to all resources"
   type        = map(string)

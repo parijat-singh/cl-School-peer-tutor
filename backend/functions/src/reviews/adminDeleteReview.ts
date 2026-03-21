@@ -2,6 +2,7 @@
 import * as functions from "firebase-functions/v2/https";
 import { z } from "zod";
 import { db, FieldValue } from "../lib/admin";
+import { requireAuth } from "../lib/cognitoAuth";
 
 export const adminDeleteReviewSchema = z.object({
   reviewId: z.string().min(1),
@@ -11,8 +12,8 @@ export const adminDeleteReviewSchema = z.object({
 export const adminDeleteReview = functions.onCall(
   { region: "us-central1" },
   async (request) => {
-    if (!request.auth) throw new functions.HttpsError("unauthenticated", "Sign in required.");
-    const callerRole = request.auth.token.role;
+    const caller = await requireAuth(request);
+    const callerRole = caller.token.role;
     if (!["schooladmin", "superadmin"].includes(callerRole)) {
       throw new functions.HttpsError("permission-denied", "Admins only.");
     }
@@ -26,7 +27,7 @@ export const adminDeleteReview = functions.onCall(
 
     const review = reviewSnap.data()!;
     // School admins can only act within their school; super admins have cross-school access
-    if (callerRole === "schooladmin" && review.schoolDomain !== request.auth.token.schoolDomain) {
+    if (callerRole === "schooladmin" && review.schoolDomain !== caller.token.schoolDomain) {
       throw new functions.HttpsError("permission-denied", "Cross-school action denied.");
     }
 
@@ -36,7 +37,7 @@ export const adminDeleteReview = functions.onCall(
 
       // Write audit log entry
       txn.set(db.collection("adminAuditLog").doc(), {
-        adminUid:    request.auth!.uid,
+        adminUid:    caller.uid,
         action:      "delete_review",
         targetId:    reviewId,
         reason,

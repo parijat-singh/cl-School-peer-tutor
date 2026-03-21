@@ -5,6 +5,7 @@ import path from "path";
 
 export default defineConfig({
   plugins: [react()],
+  css: { postcss: {} },
   test: {
     css: false,
     environment: "node",
@@ -34,6 +35,9 @@ export default defineConfig({
       "@hooks": path.resolve(__dirname, "./src/hooks"),
       "@lib": path.resolve(__dirname, "./src/lib"),
     },
+  },
+  optimizeDeps: {
+    include: ["@aws-sdk/client-cognito-identity-provider"],
   },
   server: {
     host: "0.0.0.0",

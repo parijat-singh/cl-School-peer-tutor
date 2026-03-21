@@ -1,10 +1,11 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
+import { requireAuth } from "../lib/cognitoAuth";
 
 export const removeSchool = onCall(async (request) => {
-  if (!request.auth) throw new HttpsError("unauthenticated", "Sign in required");
+  const caller = await requireAuth(request);
 
-  if (request.auth.token.role !== "superadmin") {
+  if (caller.token.role !== "superadmin") {
     throw new HttpsError("permission-denied", "Only super admins can remove schools.");
   }
 
@@ -19,7 +20,7 @@ export const removeSchool = onCall(async (request) => {
   await schoolRef.delete();
 
   await db.collection("adminAuditLog").add({
-    adminUid: request.auth.uid,
+    adminUid: caller.uid,
     action: "remove_school",
     targetId: domain,
     metadata: { schoolName: snap.data()?.name },
