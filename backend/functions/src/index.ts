@@ -28,6 +28,7 @@ export { addSchool }            from "./schools/addSchool";
 export { approveSchool }        from "./schools/approveSchool";
 export { rejectSchool }         from "./schools/rejectSchool";
 export { removeSchool }         from "./schools/removeSchool";
+export { adminSetClaims }          from "./auth/adminSetClaims";
 export { promoteSuperAdmin }      from "./auth/promoteSuperAdmin";
 export { initializeUser }         from "./auth/initializeUser";
 export { updateTutorProfile }     from "./auth/updateTutorProfile";
