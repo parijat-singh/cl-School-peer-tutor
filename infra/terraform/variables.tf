@@ -77,3 +77,85 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+# ── Backend / Lambda variables ───────────────────────────────────────────────
+
+variable "lambda_deploy_bucket" {
+  description = "S3 bucket name that holds Lambda deployment zips (lambdas/{group}.zip)"
+  type        = string
+}
+
+variable "sentry_dsn" {
+  description = "Sentry DSN for Lambda error reporting"
+  type        = string
+  default     = ""
+}
+
+variable "smtp_host" {
+  description = "SMTP server host for outbound email"
+  type        = string
+  default     = ""
+}
+
+variable "smtp_port" {
+  description = "SMTP server port"
+  type        = string
+  default     = ""
+}
+
+variable "smtp_user" {
+  description = "SMTP username"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "smtp_pass" {
+  description = "SMTP password"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "smtp_from_email" {
+  description = "From email address for outbound emails"
+  type        = string
+  default     = ""
+}
+
+variable "smtp_from_name" {
+  description = "From display name for outbound emails"
+  type        = string
+  default     = ""
+}
+
+variable "super_admin_email" {
+  description = "Email address of the super admin user"
+  type        = string
+}
+
+variable "google_calendar_client_email" {
+  description = "Google Calendar service account email"
+  type        = string
+  default     = ""
+}
+
+variable "google_calendar_private_key" {
+  description = "Google Calendar service account private key"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "google_calendar_id" {
+  description = "Google Calendar ID for session events"
+  type        = string
+  default     = ""
+}
+
+variable "anthropic_api_key" {
+  description = "Anthropic API key for AI-powered tutor recommendations"
+  type        = string
+  default     = ""
+  sensitive   = true
+}

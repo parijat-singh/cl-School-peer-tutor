@@ -1,23 +1,57 @@
-# PeerTutor — Lambda functions (Phase 2: replaces Firebase Cloud Functions)
+# PeerTutor — Lambda functions for API backend
+# Six handler groups deployed from S3 zips built in CI.
 
-# ── S3 bucket for Lambda deployment packages ─────────────────────────────────
-resource "aws_s3_bucket" "lambda_artifacts" {
-  bucket = "${local.name_prefix}-lambda-artifacts-${data.aws_caller_identity.current.account_id}"
-  tags   = merge(var.tags, { Name = "${local.name_prefix}-lambda-artifacts" })
+locals {
+  lambda_groups = toset(["auth", "bookings", "schools", "reviews", "misc", "scheduled"])
+
+  lambda_environment = {
+    NODE_OPTIONS = "--enable-source-maps"
+
+    # DynamoDB table names
+    DYNAMODB_TABLE_USERS               = aws_dynamodb_table.tables["users"].name
+    DYNAMODB_TABLE_AVAILABILITY_SLOTS  = aws_dynamodb_table.tables["availability-slots"].name
+    DYNAMODB_TABLE_SESSIONS            = aws_dynamodb_table.tables["sessions"].name
+    DYNAMODB_TABLE_BOOKING_REQUESTS    = aws_dynamodb_table.tables["booking-requests"].name
+    DYNAMODB_TABLE_REVIEWS             = aws_dynamodb_table.tables["reviews"].name
+    DYNAMODB_TABLE_SCHOOLS             = aws_dynamodb_table.tables["schools"].name
+    DYNAMODB_TABLE_STATS               = aws_dynamodb_table.tables["stats"].name
+    DYNAMODB_TABLE_EMAIL_VERIFICATIONS = aws_dynamodb_table.tables["email-verifications"].name
+    DYNAMODB_TABLE_RATE_LIMITS         = aws_dynamodb_table.tables["rate-limits"].name
+    DYNAMODB_TABLE_ADMIN_AUDIT_LOG     = aws_dynamodb_table.tables["admin-audit-log"].name
+    DYNAMODB_TABLE_CONTACT_SUBMISSIONS = aws_dynamodb_table.tables["contact-submissions"].name
+
+    # Cognito
+    COGNITO_USER_POOL_ID  = aws_cognito_user_pool.main.id
+    COGNITO_APP_CLIENT_ID = aws_cognito_user_pool_client.spa.id
+    AWS_REGION_NAME       = var.aws_region
+
+    # External services
+    SENTRY_DSN        = var.sentry_dsn
+    SUPER_ADMIN_EMAIL = var.super_admin_email
+    ANTHROPIC_API_KEY = var.anthropic_api_key
+
+    # SMTP
+    SMTP_HOST       = var.smtp_host
+    SMTP_PORT       = var.smtp_port
+    SMTP_USER       = var.smtp_user
+    SMTP_PASS       = var.smtp_pass
+    SMTP_FROM_EMAIL = var.smtp_from_email
+    SMTP_FROM_NAME  = var.smtp_from_name
+
+    # Google Calendar
+    GOOGLE_CALENDAR_CLIENT_EMAIL = var.google_calendar_client_email
+    GOOGLE_CALENDAR_PRIVATE_KEY  = var.google_calendar_private_key
+    GOOGLE_CALENDAR_ID           = var.google_calendar_id
+
+    # Logos bucket
+    LOGOS_BUCKET_NAME = aws_s3_bucket.logos.id
+  }
 }
 
-resource "aws_s3_bucket_public_access_block" "lambda_artifacts" {
-  bucket = aws_s3_bucket.lambda_artifacts.id
+# ── Shared IAM execution role ────────────────────────────────────────────────
 
-  block_public_acls       = true
-  block_public_policy     = true
-  ignore_public_acls      = true
-  restrict_public_buckets = true
-}
-
-# ── IAM execution role for all Lambda functions ──────────────────────────────
 resource "aws_iam_role" "lambda_exec" {
-  name = "${local.name_prefix}-lambda-exec"
+  name = "${var.project_name}-lambda-exec"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -28,236 +62,137 @@ resource "aws_iam_role" "lambda_exec" {
     }]
   })
 
-  tags = merge(var.tags, { Name = "${local.name_prefix}-lambda-exec" })
+  tags = merge(var.tags, { Name = "${var.project_name}-lambda-exec" })
 }
 
-# CloudWatch Logs
-resource "aws_iam_role_policy_attachment" "lambda_logs" {
-  role       = aws_iam_role.lambda_exec.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-}
-
-# DynamoDB access (all tables)
-resource "aws_iam_role_policy" "lambda_dynamodb" {
-  name = "${local.name_prefix}-lambda-dynamodb"
+resource "aws_iam_role_policy" "lambda_policy" {
+  name = "${var.project_name}-lambda-policy"
   role = aws_iam_role.lambda_exec.id
+
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Sid    = "DynamoDBAccess"
-      Effect = "Allow"
-      Action = [
-        "dynamodb:GetItem",
-        "dynamodb:PutItem",
-        "dynamodb:UpdateItem",
-        "dynamodb:DeleteItem",
-        "dynamodb:Query",
-        "dynamodb:Scan",
-        "dynamodb:BatchGetItem",
-        "dynamodb:BatchWriteItem",
-        "dynamodb:TransactGetItems",
-        "dynamodb:TransactWriteItems",
-      ]
-      Resource = [
-        for table in [
-          aws_dynamodb_table.users,
-          aws_dynamodb_table.availability_slots,
-          aws_dynamodb_table.sessions,
-          aws_dynamodb_table.booking_requests,
-          aws_dynamodb_table.reviews,
-          aws_dynamodb_table.schools,
-          aws_dynamodb_table.stats,
-          aws_dynamodb_table.email_verifications,
-          aws_dynamodb_table.rate_limits,
-          aws_dynamodb_table.admin_audit_log,
-          aws_dynamodb_table.contact_submissions,
-        ] : "${table.arn}*" # * covers table + all GSIs
-      ]
-    }]
+    Statement = [
+      {
+        Sid    = "CloudWatchLogs"
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+        ]
+        Resource = "arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:*"
+      },
+      {
+        Sid    = "DynamoDBReadWrite"
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem",
+          "dynamodb:Query",
+          "dynamodb:Scan",
+          "dynamodb:BatchGetItem",
+          "dynamodb:BatchWriteItem",
+          "dynamodb:TransactGetItems",
+          "dynamodb:TransactWriteItems",
+        ]
+        Resource = concat(
+          [for t in aws_dynamodb_table.tables : t.arn],
+          [for t in aws_dynamodb_table.tables : "${t.arn}/index/*"],
+        )
+      },
+      {
+        Sid    = "CognitoAdminOps"
+        Effect = "Allow"
+        Action = [
+          "cognito-idp:AdminGetUser",
+          "cognito-idp:AdminUpdateUserAttributes",
+          "cognito-idp:AdminDisableUser",
+          "cognito-idp:AdminEnableUser",
+          "cognito-idp:AdminSetUserPassword",
+          "cognito-idp:AdminCreateUser",
+          "cognito-idp:AdminDeleteUser",
+          "cognito-idp:ListUsers",
+        ]
+        Resource = aws_cognito_user_pool.main.arn
+      },
+      {
+        Sid    = "SESSendEmail"
+        Effect = "Allow"
+        Action = [
+          "ses:SendEmail",
+          "ses:SendRawEmail",
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "S3LogosBucket"
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:DeleteObject",
+          "s3:ListBucket",
+        ]
+        Resource = [
+          aws_s3_bucket.logos.arn,
+          "${aws_s3_bucket.logos.arn}/*",
+        ]
+      },
+    ]
   })
 }
 
-# S3 access (logos bucket — presigned URLs + read)
-resource "aws_iam_role_policy" "lambda_s3_logos" {
-  name = "${local.name_prefix}-lambda-s3-logos"
-  role = aws_iam_role.lambda_exec.id
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Sid    = "S3LogoAccess"
-      Effect = "Allow"
-      Action = [
-        "s3:PutObject",
-        "s3:GetObject",
-        "s3:DeleteObject",
-      ]
-      Resource = "${aws_s3_bucket.logos.arn}/*"
-    }]
-  })
-}
+# ── Lambda functions (one per handler group) ─────────────────────────────────
 
-# Cognito admin operations (same permissions as cognito-backend IAM user)
-resource "aws_iam_role_policy" "lambda_cognito" {
-  name = "${local.name_prefix}-lambda-cognito"
-  role = aws_iam_role.lambda_exec.id
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Sid    = "CognitoAdminOps"
-      Effect = "Allow"
-      Action = [
-        "cognito-idp:AdminGetUser",
-        "cognito-idp:AdminUpdateUserAttributes",
-        "cognito-idp:AdminDisableUser",
-        "cognito-idp:AdminEnableUser",
-        "cognito-idp:AdminSetUserPassword",
-      ]
-      Resource = aws_cognito_user_pool.main.arn
-    }]
-  })
-}
+resource "aws_lambda_function" "handlers" {
+  for_each = local.lambda_groups
 
-# ── Shared Lambda environment variables ──────────────────────────────────────
-locals {
-  lambda_runtime = "nodejs22.x"
-  lambda_timeout = 30
-  lambda_memory  = 256
+  function_name = "${var.project_name}-${each.key}"
+  description   = "PeerTutor ${each.key} handler"
+  role          = aws_iam_role.lambda_exec.arn
+  runtime       = "nodejs22.x"
+  handler       = "index.handler"
+  architectures = ["arm64"]
+  memory_size   = each.key == "scheduled" ? 128 : 256
+  timeout       = each.key == "scheduled" ? 300 : 30
 
-  lambda_env = {
-    NODE_OPTIONS              = "--enable-source-maps"
-    USERS_TABLE               = aws_dynamodb_table.users.name
-    AVAILABILITY_TABLE        = aws_dynamodb_table.availability_slots.name
-    SESSIONS_TABLE            = aws_dynamodb_table.sessions.name
-    BOOKING_REQUESTS_TABLE    = aws_dynamodb_table.booking_requests.name
-    REVIEWS_TABLE             = aws_dynamodb_table.reviews.name
-    SCHOOLS_TABLE             = aws_dynamodb_table.schools.name
-    STATS_TABLE               = aws_dynamodb_table.stats.name
-    EMAIL_VERIFICATIONS_TABLE = aws_dynamodb_table.email_verifications.name
-    RATE_LIMITS_TABLE         = aws_dynamodb_table.rate_limits.name
-    ADMIN_AUDIT_LOG_TABLE     = aws_dynamodb_table.admin_audit_log.name
-    CONTACT_SUBMISSIONS_TABLE = aws_dynamodb_table.contact_submissions.name
-    LOGOS_BUCKET              = aws_s3_bucket.logos.id
-    LOGOS_BASE_URL            = "https://${aws_cloudfront_distribution.frontend.domain_name}/logos"
-    COGNITO_USER_POOL_ID      = aws_cognito_user_pool.main.id
-    COGNITO_APP_CLIENT_ID     = aws_cognito_user_pool_client.spa.id
-    AWS_ACCOUNT_REGION        = var.aws_region
-    # Secrets injected via CD pipeline as Terraform variables
-    SENTRY_DSN                = var.lambda_sentry_dsn
-    SMTP_HOST                 = var.lambda_smtp_host
-    SMTP_PORT                 = var.lambda_smtp_port
-    SMTP_USER                 = var.lambda_smtp_user
-    SMTP_PASS                 = var.lambda_smtp_pass
-    SMTP_FROM_EMAIL           = var.lambda_smtp_from_email
-    SMTP_FROM_NAME            = var.lambda_smtp_from_name
-    SUPER_ADMIN_EMAIL         = var.lambda_super_admin_email
-    GOOGLE_CALENDAR_CLIENT_EMAIL = var.lambda_google_calendar_client_email
-    GOOGLE_CALENDAR_PRIVATE_KEY  = var.lambda_google_calendar_private_key
-    GOOGLE_CALENDAR_ID           = var.lambda_google_calendar_id
-    ANTHROPIC_API_KEY            = var.lambda_anthropic_api_key
+  s3_bucket = var.lambda_deploy_bucket
+  s3_key    = "lambdas/${each.key}.zip"
+
+  environment {
+    variables = local.lambda_environment
   }
-}
 
-# ── Lambda functions ─────────────────────────────────────────────────────────
-# Initial deployment uses a placeholder zip; CD pipeline updates with real code.
+  tags = merge(var.tags, { Name = "${var.project_name}-${each.key}" })
 
-resource "aws_lambda_function" "auth" {
-  function_name = "${local.name_prefix}-auth"
-  role          = aws_iam_role.lambda_exec.arn
-  runtime       = local.lambda_runtime
-  handler       = "index.handler"
-  timeout       = local.lambda_timeout
-  memory_size   = local.lambda_memory
-
-  s3_bucket = aws_s3_bucket.lambda_artifacts.id
-  s3_key    = "auth/function.zip"
-
-  environment { variables = local.lambda_env }
-  tags = merge(var.tags, { Name = "${local.name_prefix}-auth" })
+  depends_on = [
+    aws_cloudwatch_log_group.lambda_logs,
+  ]
 
   lifecycle { ignore_changes = [s3_key, s3_object_version] }
 }
 
-resource "aws_lambda_function" "bookings" {
-  function_name = "${local.name_prefix}-bookings"
-  role          = aws_iam_role.lambda_exec.arn
-  runtime       = local.lambda_runtime
-  handler       = "index.handler"
-  timeout       = local.lambda_timeout
-  memory_size   = local.lambda_memory
+# ── CloudWatch Log Groups ────────────────────────────────────────────────────
 
-  s3_bucket = aws_s3_bucket.lambda_artifacts.id
-  s3_key    = "bookings/function.zip"
+resource "aws_cloudwatch_log_group" "lambda_logs" {
+  for_each = local.lambda_groups
 
-  environment { variables = local.lambda_env }
-  tags = merge(var.tags, { Name = "${local.name_prefix}-bookings" })
+  name              = "/aws/lambda/${var.project_name}-${each.key}"
+  retention_in_days = 30
 
-  lifecycle { ignore_changes = [s3_key, s3_object_version] }
+  tags = merge(var.tags, { Name = "${var.project_name}-${each.key}-logs" })
 }
 
-resource "aws_lambda_function" "schools" {
-  function_name = "${local.name_prefix}-schools"
-  role          = aws_iam_role.lambda_exec.arn
-  runtime       = local.lambda_runtime
-  handler       = "index.handler"
-  timeout       = local.lambda_timeout
-  memory_size   = local.lambda_memory
+# ── API Gateway invoke permission (all groups except scheduled) ──────────────
 
-  s3_bucket = aws_s3_bucket.lambda_artifacts.id
-  s3_key    = "schools/function.zip"
+resource "aws_lambda_permission" "apigw" {
+  for_each = setsubtract(local.lambda_groups, toset(["scheduled"]))
 
-  environment { variables = local.lambda_env }
-  tags = merge(var.tags, { Name = "${local.name_prefix}-schools" })
-
-  lifecycle { ignore_changes = [s3_key, s3_object_version] }
-}
-
-resource "aws_lambda_function" "reviews" {
-  function_name = "${local.name_prefix}-reviews"
-  role          = aws_iam_role.lambda_exec.arn
-  runtime       = local.lambda_runtime
-  handler       = "index.handler"
-  timeout       = local.lambda_timeout
-  memory_size   = local.lambda_memory
-
-  s3_bucket = aws_s3_bucket.lambda_artifacts.id
-  s3_key    = "reviews/function.zip"
-
-  environment { variables = local.lambda_env }
-  tags = merge(var.tags, { Name = "${local.name_prefix}-reviews" })
-
-  lifecycle { ignore_changes = [s3_key, s3_object_version] }
-}
-
-resource "aws_lambda_function" "misc" {
-  function_name = "${local.name_prefix}-misc"
-  role          = aws_iam_role.lambda_exec.arn
-  runtime       = local.lambda_runtime
-  handler       = "index.handler"
-  timeout       = 60 # longer for AI recommendation calls
-  memory_size   = local.lambda_memory
-
-  s3_bucket = aws_s3_bucket.lambda_artifacts.id
-  s3_key    = "misc/function.zip"
-
-  environment { variables = local.lambda_env }
-  tags = merge(var.tags, { Name = "${local.name_prefix}-misc" })
-
-  lifecycle { ignore_changes = [s3_key, s3_object_version] }
-}
-
-resource "aws_lambda_function" "scheduled" {
-  function_name = "${local.name_prefix}-scheduled"
-  role          = aws_iam_role.lambda_exec.arn
-  runtime       = local.lambda_runtime
-  handler       = "index.handler"
-  timeout       = 300 # scheduled tasks may process many items
-  memory_size   = 512
-
-  s3_bucket = aws_s3_bucket.lambda_artifacts.id
-  s3_key    = "scheduled/function.zip"
-
-  environment { variables = local.lambda_env }
-  tags = merge(var.tags, { Name = "${local.name_prefix}-scheduled" })
-
-  lifecycle { ignore_changes = [s3_key, s3_object_version] }
+  statement_id  = "AllowAPIGatewayInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.handlers[each.key].function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.main.execution_arn}/*/*"
 }

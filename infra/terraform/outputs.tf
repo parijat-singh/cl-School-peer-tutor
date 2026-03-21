@@ -70,3 +70,36 @@ output "cognito_backend_iam_user_name" {
   description = "IAM user for backend Cognito admin ops — create access key and add to Firebase env"
   value       = aws_iam_user.cognito_backend.name
 }
+
+# ── API Gateway ──────────────────────────────────────────────────────────────
+
+output "api_gateway_url" {
+  description = "HTTP API invoke URL (base URL for backend requests)"
+  value       = aws_apigatewayv2_api.main.api_endpoint
+}
+
+output "api_gateway_id" {
+  description = "API Gateway HTTP API ID"
+  value       = aws_apigatewayv2_api.main.id
+}
+
+# ── Lambda ───────────────────────────────────────────────────────────────────
+
+output "lambda_function_names" {
+  description = "Map of handler group to Lambda function name"
+  value       = { for k, v in aws_lambda_function.handlers : k => v.function_name }
+}
+
+# ── DynamoDB ─────────────────────────────────────────────────────────────────
+
+output "dynamodb_table_names" {
+  description = "Map of logical table name to physical DynamoDB table name"
+  value       = { for k, v in aws_dynamodb_table.tables : k => v.name }
+}
+
+# ── S3 Logos ─────────────────────────────────────────────────────────────────
+
+output "logos_bucket_name" {
+  description = "S3 bucket name for school logo uploads"
+  value       = aws_s3_bucket.logos.id
+}

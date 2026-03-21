@@ -1,6 +1,0 @@
-{
-  "projects": {
-    "default": "peertutor-prod",
-    "dev": "peertutor-dev"
-  }
-}

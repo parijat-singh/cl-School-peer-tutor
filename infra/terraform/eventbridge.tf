@@ -1,89 +1,51 @@
-# PeerTutor — EventBridge scheduled rules (Phase 2: replaces Firebase scheduled functions)
+# PeerTutor — EventBridge rules for scheduled Lambda tasks
 
-# ── Send Session Reminders (every 60 minutes) ───────────────────────────────
-resource "aws_cloudwatch_event_rule" "send_reminders" {
-  name                = "${local.name_prefix}-send-reminders"
-  description         = "Trigger session reminder emails (24h and 1h before)"
-  schedule_expression = "rate(60 minutes)"
-  tags                = var.tags
+# ── Cleanup expired availability slots — daily at 3 AM UTC ──────────────────
+
+resource "aws_cloudwatch_event_rule" "cleanup_expired_slots" {
+  name                = "${var.project_name}-cleanup-expired-slots"
+  description         = "Trigger cleanup of expired availability slots daily at 3 AM UTC"
+  schedule_expression = "cron(0 3 * * ? *)"
+
+  tags = merge(var.tags, { Name = "${var.project_name}-cleanup-expired-slots" })
 }
 
-resource "aws_cloudwatch_event_target" "send_reminders" {
-  rule = aws_cloudwatch_event_rule.send_reminders.name
-  arn  = aws_lambda_function.scheduled.arn
-  input = jsonencode({ action = "sendSessionReminders" })
+resource "aws_cloudwatch_event_target" "cleanup_expired_slots" {
+  rule      = aws_cloudwatch_event_rule.cleanup_expired_slots.name
+  target_id = "scheduled-lambda-cleanup"
+  arn       = aws_lambda_function.handlers["scheduled"].arn
+  input     = jsonencode({ task = "cleanup-expired-slots" })
+}
+
+resource "aws_lambda_permission" "eventbridge_cleanup" {
+  statement_id  = "AllowEventBridgeCleanup"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.handlers["scheduled"].function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.cleanup_expired_slots.arn
+}
+
+# ── Session reminders — every 15 minutes ────────────────────────────────────
+
+resource "aws_cloudwatch_event_rule" "session_reminders" {
+  name                = "${var.project_name}-session-reminders"
+  description         = "Trigger session reminder checks every 15 minutes"
+  schedule_expression = "rate(15 minutes)"
+
+  tags = merge(var.tags, { Name = "${var.project_name}-session-reminders" })
+}
+
+resource "aws_cloudwatch_event_target" "session_reminders" {
+  rule      = aws_cloudwatch_event_rule.session_reminders.name
+  target_id = "scheduled-lambda-reminders"
+  arn       = aws_lambda_function.handlers["scheduled"].arn
+  input     = jsonencode({ task = "session-reminders" })
 }
 
 resource "aws_lambda_permission" "eventbridge_reminders" {
   statement_id  = "AllowEventBridgeReminders"
   action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.scheduled.function_name
+  function_name = aws_lambda_function.handlers["scheduled"].function_name
   principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.send_reminders.arn
-}
-
-# ── Trigger Rating Prompts (every 15 minutes) ───────────────────────────────
-resource "aws_cloudwatch_event_rule" "trigger_ratings" {
-  name                = "${local.name_prefix}-trigger-ratings"
-  description         = "Prompt users to rate completed sessions"
-  schedule_expression = "rate(15 minutes)"
-  tags                = var.tags
-}
-
-resource "aws_cloudwatch_event_target" "trigger_ratings" {
-  rule = aws_cloudwatch_event_rule.trigger_ratings.name
-  arn  = aws_lambda_function.scheduled.arn
-  input = jsonencode({ action = "triggerRatingPrompts" })
-}
-
-resource "aws_lambda_permission" "eventbridge_ratings" {
-  statement_id  = "AllowEventBridgeRatings"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.scheduled.function_name
-  principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.trigger_ratings.arn
-}
-
-# ── Update School Stats (every 60 minutes) ──────────────────────────────────
-resource "aws_cloudwatch_event_rule" "update_stats" {
-  name                = "${local.name_prefix}-update-stats"
-  description         = "Recalculate school statistics (replaces Firestore onWrite trigger)"
-  schedule_expression = "rate(60 minutes)"
-  tags                = var.tags
-}
-
-resource "aws_cloudwatch_event_target" "update_stats" {
-  rule = aws_cloudwatch_event_rule.update_stats.name
-  arn  = aws_lambda_function.scheduled.arn
-  input = jsonencode({ action = "updateSchoolStats" })
-}
-
-resource "aws_lambda_permission" "eventbridge_stats" {
-  statement_id  = "AllowEventBridgeStats"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.scheduled.function_name
-  principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.update_stats.arn
-}
-
-# ── Purge Old Sessions (every 24 hours) ─────────────────────────────────────
-resource "aws_cloudwatch_event_rule" "purge_sessions" {
-  name                = "${local.name_prefix}-purge-sessions"
-  description         = "Delete sessions older than 24 months (data retention)"
-  schedule_expression = "rate(24 hours)"
-  tags                = var.tags
-}
-
-resource "aws_cloudwatch_event_target" "purge_sessions" {
-  rule = aws_cloudwatch_event_rule.purge_sessions.name
-  arn  = aws_lambda_function.scheduled.arn
-  input = jsonencode({ action = "purgeOldSessions" })
-}
-
-resource "aws_lambda_permission" "eventbridge_purge" {
-  statement_id  = "AllowEventBridgePurge"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.scheduled.function_name
-  principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.purge_sessions.arn
+  source_arn    = aws_cloudwatch_event_rule.session_reminders.arn
 }
