@@ -1,8 +1,7 @@
 // src/pages/TutorProfile.tsx
 import { useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
-import { getUserDoc } from "@/lib/firestore";
-import { getTutorReviews, subscribeTutorSlots } from "@/lib/firestore";
+import { getUserDoc, getTutorReviews, getTutorSlots } from "@/lib/api-queries";
 import { Button, Badge, StarRating } from "@/components/shared/ui";
 import type { UserDoc, ReviewDoc, AvailabilitySlot } from "@/lib/types";
 import { useAuth } from "@/lib/auth-context";
@@ -25,12 +24,11 @@ export default function TutorProfile() {
       else setError("Tutor not found.");
     }).catch(() => setError("Failed to load tutor profile."));
     if (currentUser?.schoolDomain) {
-      getTutorReviews(tutorId, currentUser.schoolDomain).then(setReviews).catch(() => {});
+      getTutorReviews(tutorId).then(setReviews).catch(() => {});
     }
-    const unsub = subscribeTutorSlots(tutorId, (s) =>
+    getTutorSlots(tutorId).then((s) =>
       setSlots(s.filter((sl) => !sl.booked))
-    );
-    return unsub;
+    ).catch(() => {});
   }, [tutorId, currentUser]);
 
   if (error) return <div className="text-center py-20 text-red-500 text-sm">{error}</div>;
@@ -100,7 +98,7 @@ export default function TutorProfile() {
                   <StarRating value={r.stars} size="sm" />
                 </div>
                 {r.text && <p className="text-sm text-gray-600">{r.text}</p>}
-                <p className="text-xs text-gray-400 mt-1">{format(r.createdAt.toDate(), "MMM d, yyyy")}</p>
+                <p className="text-xs text-gray-400 mt-1">{format(new Date(r.createdAt), "MMM d, yyyy")}</p>
               </div>
             ))}
           </div>

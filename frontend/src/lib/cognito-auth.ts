@@ -165,6 +165,21 @@ export async function cognitoResendConfirmationCode(
   );
 }
 
+export async function cognitoChangePassword(
+  accessToken: string,
+  previousPassword: string,
+  proposedPassword: string,
+): Promise<void> {
+  const { sdk, client } = await getSDK();
+  await client.send(
+    new sdk.ChangePasswordCommand({
+      AccessToken: accessToken,
+      PreviousPassword: previousPassword,
+      ProposedPassword: proposedPassword,
+    }),
+  );
+}
+
 export async function cognitoGetUser(
   accessToken: string,
 ): Promise<Record<string, string>> {

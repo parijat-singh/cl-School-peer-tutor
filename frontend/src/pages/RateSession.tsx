@@ -2,9 +2,8 @@
 // Deep-linked from rating prompt email: /rate/:sessionId
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { doc, getDoc } from "firebase/firestore";
-import { db } from "@/lib/firebase";
-import { submitRating } from "@/lib/functions";
+import { submitRating } from "@/lib/api-functions";
+import { api } from "@/lib/api";
 import { Button, StarRating, Toast } from "@/components/shared/ui";
 import type { SessionDoc } from "@/lib/types";
 import { useAuth } from "@/lib/auth-context";
@@ -24,9 +23,8 @@ export default function RateSession() {
 
   useEffect(() => {
     if (!sessionId) return;
-    getDoc(doc(db, "sessions", sessionId)).then((snap) => {
-      if (snap.exists()) setSession({ id: snap.id, ...snap.data() } as SessionDoc);
-      else setError("Session not found.");
+    api.get<SessionDoc>(`/sessions/${sessionId}`).then((data) => {
+      setSession(data);
     }).catch(() => setError("Failed to load session. Please try again."));
   }, [sessionId]);
 

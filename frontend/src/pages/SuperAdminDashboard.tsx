@@ -1,16 +1,21 @@
 // src/pages/SuperAdminDashboard.tsx
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useAuth } from "@/lib/auth-context";
-import { subscribeAllSchools, subscribeAllSuperAdmins, usersCol } from "@/lib/firestore";
-import { updatePassword, reauthenticateWithCredential, EmailAuthProvider } from "firebase/auth";
-import { auth } from "@/lib/firebase";
-import { adminSetClaims } from "@/lib/functions";
+import { listAllSchools, listSuperAdmins } from "@/lib/api-queries";
+import {
+  addSchool,
+  approveSchool,
+  rejectSchool,
+  removeSchool,
+  promoteSuperAdmin,
+  promoteSchoolAdmin,
+  updateSchoolProfile,
+} from "@/lib/api-functions";
+import { usePoll } from "@/lib/use-poll";
 import {
   Button, Input, Select, Modal, Toast, Badge, Divider,
 } from "@/components/shared/ui";
 import type { SchoolDoc, SchoolStatus, UserDoc } from "@/lib/types";
-import { query, where, getDocs, doc, setDoc, updateDoc, serverTimestamp, collection, addDoc } from "firebase/firestore";
-import { db } from "@/lib/firebase";
 import {
   Crown, CheckCircle, XCircle, Trash2,
   UserPlus, Building, Plus, RefreshCw, Pencil, Shield, KeyRound,
@@ -29,12 +34,19 @@ const statusConfig: Record<SchoolStatus, { label: string; color: "green" | "ambe
 };
 
 export default function SuperAdminDashboard() {
-  const { currentUser } = useAuth();
+  const { currentUser, changePassword } = useAuth();
   const [tab, setTab] = useState<"schools" | "admins">("schools");
 
-  // Data
-  const [schools, setSchools]       = useState<SchoolDoc[]>([]);
-  const [superAdmins, setSuperAdmins] = useState<UserDoc[]>([]);
+  // Data via polling (replaces onSnapshot subscriptions)
+  const { data: schools, refetch: refetchSchools } = usePoll(
+    () => listAllSchools(), [], { intervalMs: 30_000 },
+  );
+  const { data: superAdmins, refetch: refetchAdmins } = usePoll(
+    () => listSuperAdmins(), [], { intervalMs: 30_000 },
+  );
+
+  const schoolList = schools ?? [];
+  const adminList = superAdmins ?? [];
 
   // Modals
   const [rejectModal, setRejectModal]   = useState<SchoolDoc | null>(null);
@@ -83,41 +95,18 @@ export default function SuperAdminDashboard() {
   const [pwLoading, setPwLoading] = useState(false);
   const [pwError, setPwError] = useState("");
 
-  useEffect(() => {
-    const u1 = subscribeAllSchools(setSchools);
-    const u2 = subscribeAllSuperAdmins(setSuperAdmins);
-    return () => { u1(); u2(); };
-  }, []);
-
-  const filteredSchools = schools.filter((s) => {
+  const filteredSchools = schoolList.filter((s) => {
     if (schoolFilter === "all") return true;
     return getSchoolStatus(s) === schoolFilter;
   });
 
-  const pendingCount  = schools.filter((s) => getSchoolStatus(s) === "pending").length;
-  const rejectedCount = schools.filter((s) => getSchoolStatus(s) === "rejected").length;
+  const pendingCount  = schoolList.filter((s) => getSchoolStatus(s) === "pending").length;
+  const rejectedCount = schoolList.filter((s) => getSchoolStatus(s) === "rejected").length;
 
   const handleApprove = async (domain: string) => {
     try {
-      const schoolDoc = schools.find((s) => s.domain === domain);
-      await updateDoc(doc(db, "schools", domain), { approved: true, status: "approved" });
-
-      // Auto-activate the designated school admin if they already have an account
-      if (schoolDoc?.adminEmail) {
-        const q = query(usersCol(), where("email", "==", schoolDoc.adminEmail));
-        const snap = await getDocs(q);
-        if (!snap.empty) {
-          const adminUid = snap.docs[0].id;
-          await updateDoc(doc(db, "users", adminUid), {
-            role: "schooladmin",
-            status: "active",
-            schoolDomain: domain,
-            updatedAt: serverTimestamp(),
-          });
-          await adminSetClaims({ targetUid: adminUid, claims: { role: "schooladmin", schoolDomain: domain, status: "active" } });
-        }
-      }
-
+      await approveSchool({ domain });
+      refetchSchools();
       setToast({ msg: `${domain} approved`, type: "success" });
     } catch {
       setToast({ msg: "Approve failed", type: "error" });
@@ -127,7 +116,8 @@ export default function SuperAdminDashboard() {
   const handleReject = async () => {
     if (!rejectModal) return;
     try {
-      await updateDoc(doc(db, "schools", rejectModal.domain), { approved: false, status: "rejected" });
+      await rejectSchool({ domain: rejectModal.domain, reason: rejectReason });
+      refetchSchools();
       setToast({ msg: `${rejectModal.domain} rejected`, type: "success" });
     } catch {
       setToast({ msg: "Reject failed", type: "error" });
@@ -139,7 +129,8 @@ export default function SuperAdminDashboard() {
   const handleRemove = async () => {
     if (!removeModal) return;
     try {
-      await updateDoc(doc(db, "schools", removeModal.domain), { approved: false, status: "rejected" });
+      await removeSchool({ domain: removeModal.domain });
+      refetchSchools();
       setToast({ msg: `${removeModal.domain} removed`, type: "success" });
     } catch {
       setToast({ msg: "Remove failed", type: "error" });
@@ -149,7 +140,8 @@ export default function SuperAdminDashboard() {
 
   const handleReactivate = async (domain: string) => {
     try {
-      await updateDoc(doc(db, "schools", domain), { approved: true, status: "approved" });
+      await approveSchool({ domain });
+      refetchSchools();
       setToast({ msg: `${domain} reactivated`, type: "success" });
     } catch {
       setToast({ msg: "Reactivate failed", type: "error" });
@@ -172,7 +164,7 @@ export default function SuperAdminDashboard() {
     if (!editModal) return;
     setEditLoading(true);
     try {
-      await updateDoc(doc(db, "schools", editModal.domain), {
+      await updateSchoolProfile(editModal.domain, {
         name: editForm.name,
         type: editForm.type,
         adminEmail: editForm.adminEmail,
@@ -180,6 +172,7 @@ export default function SuperAdminDashboard() {
         address: editForm.address,
         location: editForm.location,
       });
+      refetchSchools();
       setToast({ msg: `${editForm.name} updated`, type: "success" });
       setEditModal(null);
     } catch {
@@ -196,19 +189,8 @@ export default function SuperAdminDashboard() {
   const handlePromote = async () => {
     if (!promoteEmail) return;
     try {
-      const q = query(usersCol(), where("email", "==", promoteEmail));
-      const snap = await getDocs(q);
-      if (snap.empty) {
-        setToast({ msg: "User not found with that email", type: "error" });
-        return;
-      }
-      const targetUid = snap.docs[0].id;
-      await updateDoc(doc(db, "users", targetUid), {
-        role: "superadmin",
-        schoolDomain: null,
-        grade: null,
-        updatedAt: serverTimestamp(),
-      });
+      await promoteSuperAdmin({ targetEmail: promoteEmail });
+      refetchAdmins();
       setToast({ msg: `${promoteEmail} promoted to Super Admin`, type: "success" });
     } catch {
       setToast({ msg: "Promote failed", type: "error" });
@@ -221,31 +203,8 @@ export default function SuperAdminDashboard() {
     if (!promoteSchoolAdminEmail || !promoteSchoolAdminModal || !currentUser) return;
     const targetDomain = promoteSchoolAdminModal.domain;
     try {
-      const q = query(usersCol(), where("email", "==", promoteSchoolAdminEmail), where("schoolDomain", "==", targetDomain));
-      const snap = await getDocs(q);
-      if (snap.empty) {
-        setToast({ msg: `No user found with that email at ${targetDomain}`, type: "error" });
-        return;
-      }
-      const targetDoc = snap.docs[0];
-      const targetUid = targetDoc.id;
-      await updateDoc(doc(db, "users", targetUid), {
-        role: "schooladmin",
-        status: "active",
-        updatedAt: serverTimestamp(),
-      });
-      await adminSetClaims({ targetUid, claims: { role: "schooladmin", schoolDomain: targetDomain, status: "active" } });
-      await addDoc(collection(db, "adminAuditLog"), {
-        adminUid: currentUser.uid,
-        action: "promote_schooladmin",
-        targetId: targetUid,
-        schoolDomain: targetDomain,
-        timestamp: serverTimestamp(),
-      });
-      // Also set as admin email on school doc if none exists
-      if (!promoteSchoolAdminModal.adminEmail) {
-        await updateDoc(doc(db, "schools", targetDomain), { adminEmail: promoteSchoolAdminEmail });
-      }
+      await promoteSchoolAdmin({ targetEmail: promoteSchoolAdminEmail, schoolDomain: targetDomain });
+      refetchSchools();
       setToast({ msg: `${promoteSchoolAdminEmail} promoted to School Admin for ${targetDomain}`, type: "success" });
     } catch {
       setToast({ msg: "Promote failed", type: "error" });
@@ -263,7 +222,7 @@ export default function SuperAdminDashboard() {
     setAddSchoolLoading(true);
     try {
       const domainLower = domain.toLowerCase();
-      await setDoc(doc(db, "schools", domainLower), {
+      await addSchool({
         domain: domainLower,
         name,
         type,
@@ -271,17 +230,13 @@ export default function SuperAdminDashboard() {
         campus,
         address,
         location,
-        approved: true,
-        status: "approved",
-        brandColor: "#0055FF",
-        logoUrl: null,
         subjects: [
           "Algebra", "Geometry", "Pre-Calculus", "Calculus", "Statistics",
           "Biology", "Chemistry", "Physics", "Earth Science",
           "English", "History", "Spanish", "French", "Computer Science", "Economics",
         ],
-        createdAt: serverTimestamp(),
       });
+      refetchSchools();
       setToast({ msg: `${name} (${domainLower}) added successfully`, type: "success" });
       setAddSchoolModal(false);
       setNewSchool({ domain: "", name: "", type: "high", adminEmail: "", campus: "", address: "", location: "" });
@@ -304,22 +259,17 @@ export default function SuperAdminDashboard() {
     if (!/[0-9]/.test(pwForm.next)) { setPwError("Must contain a number"); return; }
     if (pwForm.next !== pwForm.confirm) { setPwError("Passwords do not match"); return; }
 
-    const firebaseUser = auth.currentUser;
-    if (!firebaseUser?.email) { setPwError("No authenticated user"); return; }
-
     setPwLoading(true);
     try {
-      const credential = EmailAuthProvider.credential(firebaseUser.email, pwForm.current);
-      await reauthenticateWithCredential(firebaseUser, credential);
-      await updatePassword(firebaseUser, pwForm.next);
+      await changePassword(pwForm.current, pwForm.next);
       setPwModal(false);
       setPwForm({ current: "", next: "", confirm: "" });
       setToast({ msg: "Password changed successfully", type: "success" });
     } catch (e: unknown) {
-      const code = (e as { code?: string }).code;
-      if (code === "auth/wrong-password" || code === "auth/invalid-credential") {
+      const message = e instanceof Error ? e.message : String(e);
+      if (message.includes("Incorrect") || message.includes("incorrect")) {
         setPwError("Current password is incorrect");
-      } else if (code === "auth/too-many-requests") {
+      } else if (message.includes("limit") || message.includes("Limit")) {
         setPwError("Too many attempts. Try again later");
       } else {
         setPwError("Failed to change password. Try signing out and back in first");
@@ -350,8 +300,8 @@ export default function SuperAdminDashboard() {
       {/* Tab nav */}
       <div className="flex gap-1 border-b border-gray-200 mb-6">
         {([
-          { key: "schools" as const, label: `Schools (${schools.length})${pendingCount > 0 ? ` · ${pendingCount} pending` : ""}` },
-          { key: "admins" as const,  label: `Super Admins (${superAdmins.length})` },
+          { key: "schools" as const, label: `Schools (${schoolList.length})${pendingCount > 0 ? ` · ${pendingCount} pending` : ""}` },
+          { key: "admins" as const,  label: `Super Admins (${adminList.length})` },
         ]).map(({ key, label }) => (
           <button
             key={key}
@@ -367,7 +317,7 @@ export default function SuperAdminDashboard() {
         ))}
       </div>
 
-      {/* ── Schools Tab ── */}
+      {/* -- Schools Tab -- */}
       {tab === "schools" && (
         <div>
           {/* Filter pills + Add School button */}
@@ -493,7 +443,7 @@ export default function SuperAdminDashboard() {
         </div>
       )}
 
-      {/* ── Super Admins Tab ── */}
+      {/* -- Super Admins Tab -- */}
       {tab === "admins" && (
         <div>
           <div className="flex items-center justify-between mb-4">
@@ -515,7 +465,7 @@ export default function SuperAdminDashboard() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {superAdmins.map((admin) => (
+                {adminList.map((admin) => (
                   <tr key={admin.uid} className="hover:bg-gray-50">
                     <td className="px-4 py-3 font-medium text-gray-900">
                       <div className="flex items-center gap-2">
@@ -534,14 +484,14 @@ export default function SuperAdminDashboard() {
                 ))}
               </tbody>
             </table>
-            {superAdmins.length === 0 && (
+            {adminList.length === 0 && (
               <div className="text-center py-10 text-gray-400 text-sm">No super admins found</div>
             )}
           </div>
         </div>
       )}
 
-      {/* ── Add School Modal ── */}
+      {/* -- Add School Modal -- */}
       <Modal open={addSchoolModal} onClose={() => setAddSchoolModal(false)} title="Add New School" maxWidth="max-w-xl">
         <div className="flex flex-col gap-4">
           <p className="text-sm text-gray-600">
@@ -622,7 +572,7 @@ export default function SuperAdminDashboard() {
         </div>
       </Modal>
 
-      {/* ── Edit School Modal ── */}
+      {/* -- Edit School Modal -- */}
       <Modal open={!!editModal} onClose={() => setEditModal(null)} title={`Edit ${editModal?.name ?? "School"}`} maxWidth="max-w-xl">
         {editModal && (
           <div className="flex flex-col gap-4">
@@ -688,7 +638,7 @@ export default function SuperAdminDashboard() {
         )}
       </Modal>
 
-      {/* ── Reject School Modal ── */}
+      {/* -- Reject School Modal -- */}
       <Modal open={!!rejectModal} onClose={() => setRejectModal(null)} title="Reject School">
         {rejectModal && (
           <div className="flex flex-col gap-4">
@@ -713,7 +663,7 @@ export default function SuperAdminDashboard() {
         )}
       </Modal>
 
-      {/* ── Remove School Modal ── */}
+      {/* -- Remove School Modal -- */}
       <Modal open={!!removeModal} onClose={() => setRemoveModal(null)} title="Remove School">
         {removeModal && (
           <div className="flex flex-col gap-4">
@@ -732,7 +682,7 @@ export default function SuperAdminDashboard() {
         )}
       </Modal>
 
-      {/* ── Promote Super Admin Modal ── */}
+      {/* -- Promote Super Admin Modal -- */}
       <Modal open={promoteModal} onClose={() => setPromoteModal(false)} title="Promote to Super Admin">
         <div className="flex flex-col gap-4">
           <p className="text-sm text-gray-600">
@@ -756,7 +706,7 @@ export default function SuperAdminDashboard() {
         </div>
       </Modal>
 
-      {/* ── Promote School Admin Modal ── */}
+      {/* -- Promote School Admin Modal -- */}
       <Modal open={!!promoteSchoolAdminModal} onClose={() => { setPromoteSchoolAdminModal(null); setPromoteSchoolAdminEmail(""); }} title="Promote to School Admin">
         {promoteSchoolAdminModal && (
           <div className="flex flex-col gap-4">
@@ -782,7 +732,7 @@ export default function SuperAdminDashboard() {
         )}
       </Modal>
 
-      {/* ── Change Password Modal ── */}
+      {/* -- Change Password Modal -- */}
       <Modal open={pwModal} onClose={() => setPwModal(false)} title="Change Password">
         <div className="flex flex-col gap-4">
           <p className="text-sm text-gray-600">

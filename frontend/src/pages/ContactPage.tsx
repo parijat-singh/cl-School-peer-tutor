@@ -1,6 +1,6 @@
 // src/pages/ContactPage.tsx
 import { useState } from "react";
-import { getFunctions, httpsCallable } from "firebase/functions";
+import { submitContactForm } from "@/lib/api-functions";
 import { Mail, MessageSquare, Send, Star, CheckCircle, ChevronDown } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────
@@ -109,16 +109,13 @@ export default function ContactPage() {
   const [fRating,   setFRating]   = useState(0);
   const [fMessage,  setFMessage]  = useState("");
 
-  const fns = getFunctions();
-  const callSubmit = httpsCallable(fns, "submitContactForm");
-
   const handleContact = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     if (!cSubject) { setError("Please select a subject."); return; }
     setLoading(true);
     try {
-      await callSubmit({ type: "contact", name: cName, email: cEmail, subject: cSubject, message: cMessage });
+      await submitContactForm({ type: "contact", name: cName, email: cEmail, subject: cSubject, message: cMessage });
       setSent(true);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
@@ -133,7 +130,7 @@ export default function ContactPage() {
     if (!fCategory) { setError("Please select a category."); return; }
     setLoading(true);
     try {
-      await callSubmit({ type: "feedback", name: fName, email: fEmail, category: fCategory, rating: fRating || undefined, message: fMessage });
+      await submitContactForm({ type: "feedback", name: fName, email: fEmail, category: fCategory, rating: fRating || undefined, message: fMessage });
       setSent(true);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
