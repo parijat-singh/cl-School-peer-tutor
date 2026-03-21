@@ -946,7 +946,7 @@ export default function TuteeBooking() {
           )}
 
           {/* My Requests */}
-          {myRequests.length === 0 && mySessions.length === 0 && (
+          {myRequests.length === 0 && sessions.length === 0 && (
             <div className="text-center py-8 text-gray-400">
               <p className="text-sm">No booking requests yet. Search for a tutor to get started.</p>
             </div>
