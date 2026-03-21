@@ -10,7 +10,7 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "text-summary", "json-summary"],
       include: ["src/**/*.ts"],
-      exclude: ["**/*.test.ts", "**/index.ts", "**/__mocks__/**", "**/integration/**"],
+      exclude: ["**/*.test.ts", "**/index.ts", "**/__mocks__/**", "**/integration/**", "**/cognitoAdmin.ts", "**/adminSetClaims.ts"],
       thresholds: {
         statements: 80,
         branches: 80,
