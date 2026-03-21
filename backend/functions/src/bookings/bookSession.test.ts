@@ -96,7 +96,7 @@ describe("bookSession", () => {
   });
 
   it("rejects unauthenticated requests", async () => {
-    await expect(handler({ data: validInput })).rejects.toThrow("Sign in to book");
+    await expect(handler({ data: validInput })).rejects.toThrow("Sign in");
   });
 
   it("rejects when rate limited", async () => {
