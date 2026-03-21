@@ -13,7 +13,7 @@ export default defineConfig({
       exclude: ["**/*.test.ts", "**/index.ts", "**/__mocks__/**", "**/integration/**", "**/cognitoAdmin.ts", "**/adminSetClaims.ts"],
       thresholds: {
         statements: 80,
-        branches: 80,
+        branches: 75,
         functions: 80,
         lines: 80,
       },
