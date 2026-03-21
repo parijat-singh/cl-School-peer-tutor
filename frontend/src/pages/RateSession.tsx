@@ -15,6 +15,7 @@ export default function RateSession() {
   const navigate = useNavigate();
 
   const [session, setSession] = useState<SessionDoc | null>(null);
+  const [error, setError]     = useState("");
   const [stars, setStars]     = useState(0);
   const [text, setText]       = useState("");
   const [loading, setLoading] = useState(false);
@@ -25,7 +26,8 @@ export default function RateSession() {
     if (!sessionId) return;
     getDoc(doc(db, "sessions", sessionId)).then((snap) => {
       if (snap.exists()) setSession({ id: snap.id, ...snap.data() } as SessionDoc);
-    });
+      else setError("Session not found.");
+    }).catch(() => setError("Failed to load session. Please try again."));
   }, [sessionId]);
 
   const alreadyRated = currentUser?.role === "tutee"
@@ -45,6 +47,7 @@ export default function RateSession() {
     setLoading(false);
   };
 
+  if (error) return <div className="text-center py-20 text-red-500 text-sm">{error}</div>;
   if (!session) return <div className="text-center py-20 text-gray-400 text-sm">Loading…</div>;
 
   if (alreadyRated || done) {

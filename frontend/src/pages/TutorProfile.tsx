@@ -14,14 +14,18 @@ export default function TutorProfile() {
   const { currentUser } = useAuth();
 
   const [tutor, setTutor]     = useState<UserDoc | null>(null);
+  const [error, setError]     = useState("");
   const [reviews, setReviews] = useState<ReviewDoc[]>([]);
   const [slots, setSlots]     = useState<AvailabilitySlot[]>([]);
 
   useEffect(() => {
     if (!tutorId) return;
-    getUserDoc(tutorId).then(setTutor);
+    getUserDoc(tutorId).then((doc) => {
+      if (doc) setTutor(doc);
+      else setError("Tutor not found.");
+    }).catch(() => setError("Failed to load tutor profile."));
     if (currentUser?.schoolDomain) {
-      getTutorReviews(tutorId, currentUser.schoolDomain).then(setReviews);
+      getTutorReviews(tutorId, currentUser.schoolDomain).then(setReviews).catch(() => {});
     }
     const unsub = subscribeTutorSlots(tutorId, (s) =>
       setSlots(s.filter((sl) => !sl.booked))
@@ -29,6 +33,7 @@ export default function TutorProfile() {
     return unsub;
   }, [tutorId, currentUser]);
 
+  if (error) return <div className="text-center py-20 text-red-500 text-sm">{error}</div>;
   if (!tutor) return <div className="text-center py-20 text-gray-400">Loading…</div>;
 
   return (

@@ -1,7 +1,7 @@
 // src/components/shared/ui.tsx
 // Reusable UI primitives used across all pages
 
-import React, { useEffect, forwardRef } from "react";
+import React, { useEffect, useRef, useCallback, forwardRef } from "react";
 import { clsx } from "clsx";
 import { X, Loader2 } from "lucide-react";
 
@@ -182,14 +182,45 @@ interface ModalProps {
 }
 
 export function Modal({ open, onClose, title, children, maxWidth = "max-w-lg" }: ModalProps) {
+  const previousFocus = useRef<Element | null>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     if (open) {
+      previousFocus.current = document.activeElement;
       document.body.style.overflow = "hidden";
+      // Focus the modal container after render
+      setTimeout(() => modalRef.current?.focus(), 0);
     } else {
       document.body.style.overflow = "";
+      // Restore focus to trigger element
+      if (previousFocus.current instanceof HTMLElement) {
+        previousFocus.current.focus();
+      }
     }
     return () => { document.body.style.overflow = ""; };
   }, [open]);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === "Escape") { onClose(); return; }
+    if (e.key !== "Tab" || !modalRef.current) return;
+
+    const focusable = modalRef.current.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
+    if (focusable.length === 0) return;
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }, [onClose]);
 
   if (!open) return null;
 
@@ -200,6 +231,9 @@ export function Modal({ open, onClose, title, children, maxWidth = "max-w-lg" }:
       role="dialog"
       aria-modal="true"
       aria-labelledby="modal-title"
+      ref={modalRef}
+      tabIndex={-1}
+      onKeyDown={handleKeyDown}
     >
       <div className={clsx("bg-white rounded-lg w-full shadow-xl max-h-[90vh] overflow-y-auto", maxWidth)}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
@@ -248,19 +282,21 @@ interface StarRatingProps {
   value: number;
   onChange?: (v: number) => void;
   size?: "sm" | "md" | "lg";
+  ariaPrefix?: string;
 }
 
-export function StarRating({ value, onChange, size = "md" }: StarRatingProps) {
+export function StarRating({ value, onChange, size = "md", ariaPrefix }: StarRatingProps) {
   const sizes = { sm: "text-sm", md: "text-lg", lg: "text-2xl" };
+  const prefix = ariaPrefix ? `${ariaPrefix}: ` : "";
   return (
-    <div className="flex gap-0.5">
+    <div className="flex gap-0.5" role="group" aria-label={ariaPrefix ?? "Rating"}>
       {[1, 2, 3, 4, 5].map((n) => (
         <button
           key={n}
           type="button"
           onClick={() => onChange?.(n)}
           className={clsx(sizes[size], "transition-colors", onChange ? "cursor-pointer" : "cursor-default", n <= value ? "text-amber-400" : "text-gray-200")}
-          aria-label={`${n} star${n > 1 ? "s" : ""}`}
+          aria-label={`${prefix}${n} star${n > 1 ? "s" : ""}`}
         >
           ★
         </button>

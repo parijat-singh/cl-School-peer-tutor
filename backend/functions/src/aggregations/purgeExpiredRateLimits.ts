@@ -2,6 +2,7 @@
 // Runs daily — deletes expired rate-limit documents to prevent unbounded growth.
 
 import * as functions from "firebase-functions/v2/scheduler";
+import { logger }       from "firebase-functions/v2";
 import { db } from "../lib/admin";
 import { captureError } from "../lib/sentry";
 
@@ -16,7 +17,7 @@ export const purgeExpiredRateLimits = functions.onSchedule(
       .get();
 
     if (snapshot.empty) {
-      console.log("No expired rate-limit docs to purge.");
+      logger.info("No expired rate-limit docs to purge.");
       return;
     }
 
@@ -26,10 +27,9 @@ export const purgeExpiredRateLimits = functions.onSchedule(
     }
     try {
       await batch.commit();
-      console.log(`Purged ${snapshot.size} expired rate-limit docs.`);
+      logger.info(`Purged ${snapshot.size} expired rate-limit docs.`);
     } catch (err) {
       captureError(err, { function: "purgeExpiredRateLimits", action: "batchDelete" });
-      console.error("Failed to purge expired rate-limit docs:", err);
     }
   }
 );

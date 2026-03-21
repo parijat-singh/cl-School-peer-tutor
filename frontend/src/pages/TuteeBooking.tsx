@@ -346,8 +346,8 @@ export default function TuteeBooking() {
 
         setTutors(enriched);
         setAiPowered(rec.aiPowered);
-      } catch (err) {
-        console.warn("AI recommendation failed, using default order:", err);
+      } catch {
+        setAiPowered(false);
       } finally {
         setAiLoading(false);
       }
@@ -693,6 +693,7 @@ export default function TuteeBooking() {
                     <button
                       key={key}
                       onClick={() => setSortMode(key)}
+                      aria-pressed={sortMode === key}
                       className={`flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-medium transition-colors ${
                         sortMode === key
                           ? "bg-white text-gray-900 shadow-sm"
@@ -945,6 +946,11 @@ export default function TuteeBooking() {
           )}
 
           {/* My Requests */}
+          {myRequests.length === 0 && mySessions.length === 0 && (
+            <div className="text-center py-8 text-gray-400">
+              <p className="text-sm">No booking requests yet. Search for a tutor to get started.</p>
+            </div>
+          )}
           {myRequests.length > 0 && (
             <div>
               <h2 className="font-display text-xl text-gray-900 mb-3">My Requests</h2>

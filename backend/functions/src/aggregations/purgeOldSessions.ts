@@ -2,6 +2,7 @@
 // Monthly job: delete sessions older than 24 months (data retention policy)
 
 import * as functions from "firebase-functions/v2/scheduler";
+import { logger }       from "firebase-functions/v2";
 import { db, Timestamp } from "../lib/admin";
 import { subMonths }     from "date-fns";
 
@@ -21,6 +22,6 @@ export const purgeOldSessions = functions.onSchedule(
     snap.docs.forEach((d) => batch.delete(d.ref));
     await batch.commit();
 
-    console.log(`Purged ${snap.size} sessions older than 24 months.`);
+    logger.info(`Purged ${snap.size} sessions older than 24 months.`);
   }
 );
