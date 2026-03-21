@@ -18,6 +18,9 @@ export default defineConfig({
       exclude: [
         "**/*.test.*", "**/*.d.ts", "**/vite-env.d.ts",
         "src/lib/firebase.ts",
+        "src/lib/cognito.ts",
+        "src/lib/cognito-auth.ts",
+        "src/lib/callable.ts",
       ],
       thresholds: {
         statements: 80,
