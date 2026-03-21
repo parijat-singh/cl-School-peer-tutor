@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   mockTxnUpdate: vi.fn(),
   mockTxnSet: vi.fn(),
   mockAuthUpdateUser: vi.fn().mockResolvedValue(undefined),
+  mockAuthSetCustomUserClaims: vi.fn().mockResolvedValue(undefined),
   mockBatchUpdate: vi.fn(),
   mockBatchCommit: vi.fn().mockResolvedValue(undefined),
   mockSessionsGet: vi.fn(),
@@ -27,7 +28,7 @@ vi.mock("../lib/admin", () => ({
     runTransaction: async (fn: any) => fn({ update: mocks.mockTxnUpdate, set: mocks.mockTxnSet }),
     batch: () => ({ update: mocks.mockBatchUpdate, commit: mocks.mockBatchCommit }),
   },
-  auth: { updateUser: mocks.mockAuthUpdateUser },
+  auth: { updateUser: mocks.mockAuthUpdateUser, setCustomUserClaims: mocks.mockAuthSetCustomUserClaims },
   FieldValue: { serverTimestamp: () => "SERVER_TS", delete: () => "DEL" },
   Timestamp: { fromDate: (d: Date) => ({ toDate: () => d }) },
 }));
