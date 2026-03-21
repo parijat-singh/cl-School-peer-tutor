@@ -3,18 +3,16 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { SchoolBanner } from "@/components/shared/SchoolBanner";
 import { CalendarGrid, type CalendarDot } from "@/components/shared/CalendarGrid";
+import { getTutorSlots, getMySessions, getMyBookingRequests, getUserDoc } from "@/lib/api-queries";
 import {
-  subscribeTutorSlots, subscribeUserSessions, subscribeTutorRequests,
-  addAvailabilitySlot, removeAvailabilitySlot,
-  updateAvailabilitySlot, cancelRecurringDate, uncancelRecurringDate,
-  getUserDoc,
-} from "@/lib/firestore";
+  addAvailability, deleteAvailability, updateAvailability,
+  cancelDate, uncancelDate, respondToBooking, cancelSession,
+  submitRating, updateUserProfile,
+} from "@/lib/api-functions";
 import {
   Button, Input, Select, Textarea, Modal, Toast, Badge, StarRating, Divider,
 } from "@/components/shared/ui";
-import { doc, updateDoc, addDoc, collection, serverTimestamp } from "firebase/firestore";
-import { httpsCallable } from "firebase/functions";
-import { db, fns } from "@/lib/firebase";
+import { usePoll } from "@/lib/use-poll";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -150,13 +148,27 @@ export default function TutorDashboard() {
 
   const slotType = slotForm.watch("slotType");
 
-  useEffect(() => {
-    if (!currentUser) return;
-    const unsub1 = subscribeTutorSlots(currentUser.uid, setSlots);
-    const unsub2 = subscribeUserSessions(currentUser.uid, "tutor", setSessions);
-    const unsub3 = subscribeTutorRequests(currentUser.uid, setRequests);
-    return () => { unsub1(); unsub2(); unsub3(); };
-  }, [currentUser]);
+  // Poll slots, sessions, and requests (replaces onSnapshot subscriptions)
+  const { data: polledSlots, refetch: refetchSlots } = usePoll(
+    () => getTutorSlots(currentUser!.uid),
+    [currentUser?.uid],
+    { intervalMs: 30_000, enabled: !!currentUser },
+  );
+  useEffect(() => { if (polledSlots) setSlots(polledSlots); }, [polledSlots]);
+
+  const { data: polledSessions, refetch: refetchSessions } = usePoll(
+    () => getMySessions("tutor"),
+    [currentUser?.uid],
+    { intervalMs: 30_000, enabled: !!currentUser },
+  );
+  useEffect(() => { if (polledSessions) setSessions(polledSessions); }, [polledSessions]);
+
+  const { data: polledRequests, refetch: refetchRequests } = usePoll(
+    () => getMyBookingRequests("tutor"),
+    [currentUser?.uid],
+    { intervalMs: 15_000, enabled: !!currentUser },
+  );
+  useEffect(() => { if (polledRequests) setRequests(polledRequests); }, [polledRequests]);
 
   const handleAddSlot = slotForm.handleSubmit(async (data) => {
     if (!currentUser) return;
@@ -167,16 +179,16 @@ export default function TutorDashboard() {
         ? (data.day as (typeof DAYS_OF_WEEK)[number])
         : (dayFromDate(data.date!) as (typeof DAYS_OF_WEEK)[number]);
 
-      await addAvailabilitySlot(currentUser.uid, {
+      await addAvailability({
         recurring: isRecurring,
         day,
-        // Only include date for specific-date slots; omitting it avoids undefined field errors in Firestore
         ...(isRecurring ? {} : { date: data.date! }),
         startTime: data.startTime,
         endTime: addMinutes(data.startTime, dur),
         duration: dur,
         schoolDomain: currentUser.schoolDomain ?? "",
       });
+      refetchSlots();
       slotForm.reset({ duration: "60", slotType: "recurring", startTime: "09:00" });
       setSlotModal(false);
       setToast({ msg: isRecurring ? "Recurring slot added" : "Slot added for " + data.date, type: "success" });
@@ -187,19 +199,22 @@ export default function TutorDashboard() {
 
   const handleRemoveSlot = async (slotId: string) => {
     if (!currentUser) return;
-    await removeAvailabilitySlot(currentUser.uid, slotId);
+    await deleteAvailability(slotId);
+    refetchSlots();
     setToast({ msg: "Slot removed", type: "success" });
   };
 
   const handleCancelDate = async (slot: AvailabilitySlot, date: string) => {
     if (!currentUser) return;
-    await cancelRecurringDate(currentUser.uid, slot.id, date);
+    await cancelDate(slot.id, date);
+    refetchSlots();
     setToast({ msg: `Cancelled ${date}`, type: "success" });
   };
 
   const handleUncancelDate = async (slot: AvailabilitySlot, date: string) => {
     if (!currentUser) return;
-    await uncancelRecurringDate(currentUser.uid, slot.id, date);
+    await uncancelDate(slot.id, date);
+    refetchSlots();
     setToast({ msg: `Restored ${date}`, type: "success" });
   };
 
@@ -207,11 +222,12 @@ export default function TutorDashboard() {
     if (!editSlotModal || !currentUser || !editStartTime) return;
     try {
       const dur = Number(editDuration) as 30 | 45 | 60;
-      await updateAvailabilitySlot(currentUser.uid, editSlotModal.id, {
+      await updateAvailability(editSlotModal.id, {
         startTime: editStartTime,
         endTime: addMinutes(editStartTime, dur),
         duration: dur,
       });
+      refetchSlots();
       setEditSlotModal(null);
       setToast({ msg: "Slot updated", type: "success" });
     } catch {
@@ -222,8 +238,9 @@ export default function TutorDashboard() {
   const handleAcceptRequest = async (requestId: string) => {
     setRespondingId(requestId);
     try {
-      const fn = httpsCallable<unknown, { sessionId: string; meetLink: string | null; meetLinkStatus: string }>(fns, "respondToBooking");
-      await fn({ requestId, action: "accept" });
+      await respondToBooking({ requestId, action: "accept" });
+      refetchRequests();
+      refetchSessions();
       setToast({ msg: "Request accepted — session created!", type: "success" });
     } catch (err: unknown) {
       setToast({ msg: (err as { message?: string })?.message ?? "Failed to accept", type: "error" });
@@ -235,8 +252,8 @@ export default function TutorDashboard() {
   const handleRejectRequest = async (requestId: string) => {
     setRespondingId(requestId);
     try {
-      const fn = httpsCallable<unknown, { success: boolean }>(fns, "respondToBooking");
-      await fn({ requestId, action: "reject" });
+      await respondToBooking({ requestId, action: "reject" });
+      refetchRequests();
       setToast({ msg: "Request declined", type: "success" });
     } catch (err: unknown) {
       setToast({ msg: (err as { message?: string })?.message ?? "Failed to reject", type: "error" });
@@ -248,18 +265,9 @@ export default function TutorDashboard() {
   const handleCancelSession = async () => {
     if (!cancelModal || !currentUser) return;
     try {
-      await updateDoc(doc(db, "sessions", cancelModal.id), {
-        status: "cancelled",
-        cancelledAt: serverTimestamp(),
-        cancelledBy: currentUser.uid,
-      });
-      // Free the slot
-      if (cancelModal.slotId) {
-        await updateDoc(doc(db, "users", cancelModal.tutorId, "availability", cancelModal.slotId), {
-          booked: false,
-          bookedBy: null,
-        });
-      }
+      await cancelSession({ sessionId: cancelModal.id });
+      refetchSessions();
+      refetchSlots();
       setToast({ msg: "Session cancelled", type: "success" });
     } catch {
       setToast({ msg: "Failed to cancel session", type: "error" });
@@ -270,12 +278,11 @@ export default function TutorDashboard() {
   const handleSaveProfile = profileForm.handleSubmit(async (data) => {
     if (!currentUser) return;
     try {
-      await updateDoc(doc(db, "users", currentUser.uid), {
+      await updateUserProfile({
         name: data.name,
         grade: data.grade || null,
         subjects: selectedSubjects,
         bio: data.bio,
-        updatedAt: serverTimestamp(),
       });
       setToast({ msg: "Profile updated", type: "success" });
       setProfileModal(false);
@@ -287,21 +294,12 @@ export default function TutorDashboard() {
   const handleRateSession = async () => {
     if (!rateModal || stars === 0 || !currentUser) return;
     try {
-      await addDoc(collection(db, "reviews"), {
+      await submitRating({
         sessionId: rateModal.id,
-        authorId: currentUser.uid,
-        authorName: currentUser.name,
-        targetId: rateModal.tuteeId,
-        targetName: rateModal.tuteeName,
         stars: stars as 1 | 2 | 3 | 4 | 5,
-        text: reviewText || null,
-        flagged: false,
-        schoolDomain: currentUser.schoolDomain,
-        createdAt: serverTimestamp(),
+        text: reviewText || undefined,
       });
-      await updateDoc(doc(db, "sessions", rateModal.id), {
-        tutorRated: true,
-      });
+      refetchSessions();
       setRateModal(null);
       setStars(0);
       setReviewText("");
@@ -380,7 +378,7 @@ export default function TutorDashboard() {
 
     // Upcoming sessions (amber so they stand out from open slots)
     upcoming.forEach((session) => {
-      const d = session.scheduledDate.toDate().toISOString().split("T")[0];
+      const d = session.scheduledDate.split("T")[0];
       push(d, { color: "amber", label: session.tuteeName });
     });
 
@@ -413,7 +411,7 @@ export default function TutorDashboard() {
     });
 
     const sessionEvents = sessions.filter(
-      (s) => s.scheduledDate.toDate().toISOString().split("T")[0] === date
+      (s) => s.scheduledDate.split("T")[0] === date
     );
 
     return { slotEvents, sessionEvents };
@@ -482,7 +480,6 @@ export default function TutorDashboard() {
           <button
             key={key}
             onClick={() => setView(key)}
-            aria-pressed={view === key}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium transition-colors ${
               view === key ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"
             }`}
@@ -855,7 +852,7 @@ export default function TutorDashboard() {
                   <div className="flex items-center gap-3 text-xs text-gray-500 mb-3">
                     <span className="flex items-center gap-1">
                       <Calendar className="w-3 h-3" />
-                      {format(session.scheduledDate.toDate(), "EEE, MMM d")}
+                      {format(new Date(session.scheduledDate), "EEE, MMM d")}
                     </span>
                     <span>{session.startTime} – {session.endTime}</span>
                     <span>{session.duration} min</span>
@@ -897,7 +894,7 @@ export default function TutorDashboard() {
                     <p className="font-medium text-gray-800">{session.tuteeName}</p>
                     <p className="text-xs text-gray-500 mb-1">{session.subject} · {session.duration} min</p>
                     <p className="text-xs text-gray-400">
-                      {format(session.scheduledDate.toDate(), "MMM d, yyyy")}
+                      {format(new Date(session.scheduledDate), "MMM d, yyyy")}
                     </p>
                   </div>
                   {!session.tutorRated && (
@@ -1179,7 +1176,7 @@ export default function TutorDashboard() {
         <p className="text-sm text-gray-600 mb-6">
           Are you sure you want to cancel your session with{" "}
           <strong>{cancelModal?.tuteeName}</strong> on{" "}
-          {cancelModal && format(cancelModal.scheduledDate.toDate(), "EEEE, MMMM d")}?
+          {cancelModal && format(new Date(cancelModal.scheduledDate), "EEEE, MMMM d")}?
           The tutee will be notified by email.
         </p>
         <div className="flex justify-end gap-2">

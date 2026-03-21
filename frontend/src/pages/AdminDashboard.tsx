@@ -13,7 +13,7 @@ import { SchoolBanner } from "@/components/shared/SchoolBanner";
 import {
   Button, Input, Select, Modal, Toast, Badge, Divider,
 } from "@/components/shared/ui";
-import type { StatsDoc, ReviewDoc, UserDoc, SchoolDoc } from "@/lib/types";
+import type { ReviewDoc, UserDoc } from "@/lib/types";
 import {
   Users, Star, CalendarCheck, AlertTriangle, Shield, Flag,
   CheckCircle, Ban, Trash2, Download, UserPlus, UserMinus, UserCheck,

@@ -1,7 +1,6 @@
 // src/lib/types.ts
-// Canonical type definitions shared across frontend and backend
-
-import type { Timestamp } from "firebase/firestore";
+// Canonical type definitions shared across frontend and backend.
+// All timestamps are ISO 8601 strings (no more Firestore Timestamp).
 
 // ── Enums ────────────────────────────────────────────────────────
 
@@ -16,7 +15,7 @@ export const DAYS_OF_WEEK = [
 ] as const;
 export type DayOfWeek = typeof DAYS_OF_WEEK[number];
 
-// ── Firestore Documents ──────────────────────────────────────────
+// ── Documents ────────────────────────────────────────────────────
 
 export interface UserDoc {
   uid: string;
@@ -26,9 +25,9 @@ export interface UserDoc {
   role: UserRole;
   schoolDomain: string | null;
   status: AccountStatus;
-  suspendedUntil?: Timestamp | null;
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
+  suspendedUntil?: string | null;
+  createdAt: string;
+  updatedAt: string;
   // Tutor-specific
   subjects?: string[];
   bio?: string;
@@ -39,20 +38,18 @@ export interface UserDoc {
 
 export interface AvailabilitySlot {
   id: string;
-  recurring: boolean;           // true = repeats every week on `day`
-  day: DayOfWeek;               // always set (derived from `date` for one-off)
+  recurring: boolean;
+  day: DayOfWeek;
   date?: string;                // "YYYY-MM-DD" — set for one-off slots only
   startTime: string;            // "HH:MM" 24h format
   endTime: string;
   duration: SessionDuration;
-  // One-off slot booking state
   booked: boolean;
-  bookedBy?: string;            // tuteeUid when booked (one-off only)
-  // Recurring slot booking state
-  bookedDates?: Record<string, string>;   // { "YYYY-MM-DD": tuteeUid } for recurring
-  cancelledDates?: string[];              // dates the tutor cancelled for recurring
+  bookedBy?: string;
+  bookedDates?: Record<string, string>;
+  cancelledDates?: string[];
   schoolDomain: string;
-  createdAt: Timestamp;
+  createdAt: string;
 }
 
 export interface SessionDoc {
@@ -67,14 +64,14 @@ export interface SessionDoc {
   startTime: string;
   endTime: string;
   duration: SessionDuration;
-  scheduledDate: Timestamp;
+  scheduledDate: string;
   status: SessionStatus;
   meetLink?: string;
   calendarEventId?: string;
   meetLinkStatus: "pending" | "ready" | "failed";
   schoolDomain: string;
-  createdAt: Timestamp;
-  cancelledAt?: Timestamp;
+  createdAt: string;
+  cancelledAt?: string;
   cancelledBy?: string;
   tutorRated: boolean;
   tuteeRated: boolean;
@@ -92,7 +89,7 @@ export interface ReviewDoc {
   flagged: boolean;
   flaggedBy?: string;
   schoolDomain: string;
-  createdAt: Timestamp;
+  createdAt: string;
 }
 
 export type SchoolStatus = "pending" | "approved" | "rejected";
@@ -111,7 +108,7 @@ export interface SchoolDoc {
   brandColor: string;
   logoUrl?: string;
   subjects: string[];
-  createdAt: Timestamp;
+  createdAt: string;
 }
 
 export interface StatsDoc {
@@ -121,7 +118,7 @@ export interface StatsDoc {
   sessionsThisMonth: number;
   totalSessions: number;
   avgRating: number;
-  updatedAt: Timestamp;
+  updatedAt: string;
 }
 
 export interface AdminAuditLog {
@@ -132,7 +129,7 @@ export interface AdminAuditLog {
   reason?: string;
   metadata?: Record<string, unknown>;
   schoolDomain: string;
-  timestamp: Timestamp;
+  timestamp: string;
 }
 
 export type BookingRequestStatus = "pending" | "accepted" | "rejected" | "cancelled";
@@ -147,7 +144,7 @@ export interface BookingRequest {
   tutorEmail: string;
   slotId: string;
   subject: string;
-  scheduledDate: string;      // "YYYY-MM-DD"
+  scheduledDate: string;
   day: DayOfWeek;
   startTime: string;
   endTime: string;
@@ -155,10 +152,10 @@ export interface BookingRequest {
   recurring: boolean;
   status: BookingRequestStatus;
   schoolDomain: string;
-  createdAt: Timestamp;
-  respondedAt?: Timestamp;
-  sessionId?: string;         // set when accepted
-  rejectionReason?: string;   // "slot_taken" | custom message
+  createdAt: string;
+  respondedAt?: string;
+  sessionId?: string;
+  rejectionReason?: string;
 }
 
 // ── API Request/Response types ───────────────────────────────────
@@ -167,7 +164,7 @@ export interface BookSessionRequest {
   tutorId: string;
   slotId: string;
   subject: string;
-  scheduledDate: string; // ISO date string
+  scheduledDate: string;
 }
 
 export interface BookSessionResponse {

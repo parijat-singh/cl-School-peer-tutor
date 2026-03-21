@@ -256,9 +256,12 @@ export function recommendTutors(data: {
 // ── Contact ─────────────────────────────────────────────────────
 
 export function submitContactForm(data: {
+  type?: "contact" | "feedback";
   name: string;
   email: string;
-  subject: string;
+  subject?: string;
+  category?: string;
+  rating?: number;
   message: string;
 }) {
   return api.publicPost<{ success: boolean }>("/contact/submit", data);

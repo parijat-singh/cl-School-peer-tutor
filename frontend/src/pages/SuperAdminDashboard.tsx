@@ -15,7 +15,7 @@ import { usePoll } from "@/lib/use-poll";
 import {
   Button, Input, Select, Modal, Toast, Badge, Divider,
 } from "@/components/shared/ui";
-import type { SchoolDoc, SchoolStatus, UserDoc } from "@/lib/types";
+import type { SchoolDoc, SchoolStatus } from "@/lib/types";
 import {
   Crown, CheckCircle, XCircle, Trash2,
   UserPlus, Building, Plus, RefreshCw, Pencil, Shield, KeyRound,

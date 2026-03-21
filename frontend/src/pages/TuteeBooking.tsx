@@ -5,16 +5,14 @@ import { useAuth } from "@/lib/auth-context";
 import { useSchool } from "@/lib/school-context";
 import { SchoolBanner } from "@/components/shared/SchoolBanner";
 import { CalendarGrid, type CalendarDot } from "@/components/shared/CalendarGrid";
-import { searchTutors, subscribeUserSessions, getRecommendedTutors, subscribeTuteeRequests } from "@/lib/firestore";
+import { searchTutors, getMySessions, getMyBookingRequests } from "@/lib/api-queries";
+import { requestBooking, cancelBookingRequest, cancelSession, submitRating, updateUserProfile, recommendTutors } from "@/lib/api-functions";
 import {
   Button, Input, Select, Modal, Toast, Badge, StarRating, Divider,
 } from "@/components/shared/ui";
-import type { TutorCard as TutorCardType, AvailabilitySlot, SessionDoc, GradeLevel, BookingRequest } from "@/lib/types";
+import type { TutorCard as TutorCardType, AvailabilitySlot, SessionDoc, GradeLevel } from "@/lib/types";
 import { DAYS_OF_WEEK } from "@/lib/types";
-import { doc, updateDoc, addDoc, collection, serverTimestamp } from "firebase/firestore";
-import { httpsCallable } from "firebase/functions";
-import { db, fns } from "@/lib/firebase";
-import { getUserDoc } from "@/lib/firestore";
+import { usePoll } from "@/lib/use-poll";
 
 const GRADES: { value: GradeLevel; label: string }[] = [
   { value: "6th",  label: "6th Grade"  },
@@ -127,7 +125,6 @@ export default function TuteeBooking() {
   const [fuzzyNote, setFuzzyNote]   = useState<string | null>(null);
 
   // Sessions
-  const [sessions, setSessions] = useState<SessionDoc[]>([]);
   const [tab, setTab]           = useState<"search" | "sessions" | "calendar">("search");
 
   // Switch to the tab specified in nav-link location state (e.g. Find Tutors → search)
@@ -160,18 +157,23 @@ export default function TuteeBooking() {
   // Booking in-flight guard
   const [booking, setBooking] = useState(false);
 
-  // My booking requests (live)
-  const [myRequests, setMyRequests] = useState<BookingRequest[]>([]);
-
   // Toast
   const [toast, setToast] = useState<{ msg: string; type: "success"|"error" } | null>(null);
 
-  useEffect(() => {
-    if (!currentUser) return;
-    const unsubSessions = subscribeUserSessions(currentUser.uid, "tutee", setSessions);
-    const unsubRequests = subscribeTuteeRequests(currentUser.uid, setMyRequests);
-    return () => { unsubSessions(); unsubRequests(); };
-  }, [currentUser]);
+  // Poll sessions & booking requests (replaces onSnapshot subscriptions)
+  const { data: polledSessions, refetch: refetchSessions } = usePoll(
+    () => getMySessions("tutee"),
+    [currentUser?.uid],
+    { intervalMs: 30_000, enabled: !!currentUser },
+  );
+  const sessions = polledSessions ?? [];
+
+  const { data: polledRequests, refetch: refetchRequests } = usePoll(
+    () => getMyBookingRequests("tutee"),
+    [currentUser?.uid],
+    { intervalMs: 15_000, enabled: !!currentUser },
+  );
+  const myRequests = polledRequests ?? [];
 
   // Set of "${slotId}_${scheduledDate}" for all pending requests — used to block duplicate requests
   const pendingSlotDateSet = useMemo(
@@ -222,7 +224,7 @@ export default function TuteeBooking() {
 
     // My booked sessions
     sessions.filter((s) => s.status === "upcoming").forEach((s) => {
-      const d = s.scheduledDate.toDate().toISOString().split("T")[0];
+      const d = s.scheduledDate.split("T")[0];
       push(d, { color: "blue", label: s.tutorName });
     });
 
@@ -246,7 +248,7 @@ export default function TuteeBooking() {
   const calDaySessions = useMemo(() => {
     if (!calSelected) return [];
     return sessions.filter(
-      (s) => s.scheduledDate.toDate().toISOString().split("T")[0] === calSelected
+      (s) => s.scheduledDate.split("T")[0] === calSelected
     );
   }, [calSelected, sessions]);
 
@@ -327,10 +329,22 @@ export default function TuteeBooking() {
     if (results.length > 1) {
       setAiLoading(true);
       try {
-        const rec = await getRecommendedTutors(results, {
-          subject: effectiveSubject || undefined,
-          date: date || undefined,
-          day: day || undefined,
+        const rec = await recommendTutors({
+          tutors: results.map((t) => ({
+            uid: t.uid,
+            name: t.name,
+            grade: t.grade,
+            subjects: t.subjects,
+            bio: t.bio,
+            avgRating: t.avgRating,
+            reviewCount: t.reviewCount,
+            slotCount: t.availableSlots.length,
+            hasRecurringSlots: t.availableSlots.some((s) => s.recurring),
+            hasDateSlots: t.availableSlots.some((s) => !s.recurring),
+          })),
+          searchSubject: effectiveSubject || undefined,
+          searchDate: date || undefined,
+          searchDay: day || undefined,
         });
 
         // Apply AI scores to tutor cards
@@ -346,8 +360,8 @@ export default function TuteeBooking() {
 
         setTutors(enriched);
         setAiPowered(rec.aiPowered);
-      } catch {
-        setAiPowered(false);
+      } catch (err) {
+        console.warn("AI recommendation failed, using default order:", err);
       } finally {
         setAiLoading(false);
       }
@@ -387,8 +401,7 @@ export default function TuteeBooking() {
 
     setBooking(true);
     try {
-      const fn = httpsCallable<unknown, { requestId: string }>(fns, "requestBooking");
-      await fn({
+      await requestBooking({
         tutorId:       bookModal.tutor.uid,
         slotId:        bookModal.slot.id,
         subject:       bookingSubject || bookModal.tutor.subjects[0],
@@ -397,6 +410,7 @@ export default function TuteeBooking() {
       setBookModal(null);
       setBookingDate("");
       setTab("sessions");
+      refetchRequests();
       setToast({ msg: "Request sent! The tutor will confirm shortly.", type: "success" });
     } catch (err: unknown) {
       const msg = (err as { message?: string })?.message ?? "Request failed";
@@ -408,8 +422,8 @@ export default function TuteeBooking() {
 
   const handleCancelRequest = async (requestId: string) => {
     try {
-      const fn = httpsCallable<unknown, { success: boolean }>(fns, "cancelBookingRequest");
-      await fn({ requestId });
+      await cancelBookingRequest({ requestId });
+      refetchRequests();
       setToast({ msg: "Request cancelled", type: "success" });
     } catch (err: unknown) {
       setToast({ msg: (err as { message?: string })?.message ?? "Cancel failed", type: "error" });
@@ -419,34 +433,8 @@ export default function TuteeBooking() {
   const handleCancel = async () => {
     if (!cancelModal || !currentUser) return;
     try {
-      await updateDoc(doc(db, "sessions", cancelModal.id), {
-        status: "cancelled",
-        cancelledAt: serverTimestamp(),
-        cancelledBy: currentUser.uid,
-      });
-      // Free the slot
-      if (cancelModal.slotId) {
-        const sessionData = cancelModal as SessionDoc & { recurringSlot?: boolean; bookedDate?: string };
-        if (sessionData.recurringSlot && sessionData.bookedDate) {
-          // For recurring: remove date from bookedDates
-          const slotRef = doc(db, "users", cancelModal.tutorId, "availability", cancelModal.slotId);
-          // We need to fetch current bookedDates and remove this date
-          const { getDoc: getDocFn } = await import("firebase/firestore");
-          const slotSnap = await getDocFn(slotRef);
-          if (slotSnap.exists()) {
-            const data = slotSnap.data();
-            const bookedDates = { ...(data.bookedDates ?? {}) };
-            delete bookedDates[sessionData.bookedDate];
-            await updateDoc(slotRef, { bookedDates });
-          }
-        } else {
-          // For one-off: mark slot as unbooked
-          await updateDoc(doc(db, "users", cancelModal.tutorId, "availability", cancelModal.slotId), {
-            booked: false,
-            bookedBy: null,
-          });
-        }
-      }
+      await cancelSession({ sessionId: cancelModal.id });
+      refetchSessions();
       setToast({ msg: "Session cancelled", type: "success" });
     } catch {
       setToast({ msg: "Cancel failed", type: "error" });
@@ -457,32 +445,12 @@ export default function TuteeBooking() {
   const handleRate = async () => {
     if (!rateModal || stars === 0 || !currentUser) return;
     try {
-      await addDoc(collection(db, "reviews"), {
+      await submitRating({
         sessionId: rateModal.id,
-        authorId: currentUser.uid,
-        authorName: currentUser.name,
-        targetId: rateModal.tutorId,
-        targetName: rateModal.tutorName,
         stars: stars as 1 | 2 | 3 | 4 | 5,
-        text: reviewText || null,
-        flagged: false,
-        schoolDomain: currentUser.schoolDomain,
-        createdAt: serverTimestamp(),
+        text: reviewText || undefined,
       });
-      await updateDoc(doc(db, "sessions", rateModal.id), {
-        tuteeRated: true,
-      });
-      const tutorDoc = await getUserDoc(rateModal.tutorId);
-      if (tutorDoc) {
-        const oldCount = tutorDoc.reviewCount ?? 0;
-        const oldAvg = tutorDoc.avgRating ?? 0;
-        const newCount = oldCount + 1;
-        const newAvg = (oldAvg * oldCount + stars) / newCount;
-        await updateDoc(doc(db, "users", rateModal.tutorId), {
-          avgRating: Math.round(newAvg * 10) / 10,
-          reviewCount: newCount,
-        });
-      }
+      refetchSessions();
       setRateModal(null);
       setStars(0);
       setReviewText("");
@@ -500,10 +468,9 @@ export default function TuteeBooking() {
   const handleSaveProfile = async () => {
     if (!currentUser || !profileName) return;
     try {
-      await updateDoc(doc(db, "users", currentUser.uid), {
+      await updateUserProfile({
         name: profileName,
         grade: profileGrade || null,
-        updatedAt: serverTimestamp(),
       });
       setToast({ msg: "Profile updated", type: "success" });
       setProfileModal(false);
@@ -693,7 +660,6 @@ export default function TuteeBooking() {
                     <button
                       key={key}
                       onClick={() => setSortMode(key)}
-                      aria-pressed={sortMode === key}
                       className={`flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-medium transition-colors ${
                         sortMode === key
                           ? "bg-white text-gray-900 shadow-sm"
@@ -796,7 +762,7 @@ export default function TuteeBooking() {
                           <Badge color="blue">{s.subject}</Badge>
                           <span className="text-xs opacity-60">{s.startTime}–{s.endTime}</span>
                           {s.meetLink && (() => {
-                            const base = s.scheduledDate.toDate();
+                            const base = new Date(s.scheduledDate);
                             const [sh, sm2] = (s.startTime ?? "00:00").split(":").map(Number);
                             const [eh, em2] = (s.endTime   ?? "00:00").split(":").map(Number);
                             const startMs = new Date(base.getFullYear(), base.getMonth(), base.getDate(), sh, sm2).getTime();
@@ -946,11 +912,6 @@ export default function TuteeBooking() {
           )}
 
           {/* My Requests */}
-          {myRequests.length === 0 && sessions.length === 0 && (
-            <div className="text-center py-8 text-gray-400">
-              <p className="text-sm">No booking requests yet. Search for a tutor to get started.</p>
-            </div>
-          )}
           {myRequests.length > 0 && (
             <div>
               <h2 className="font-display text-xl text-gray-900 mb-3">My Requests</h2>
@@ -1017,7 +978,7 @@ export default function TuteeBooking() {
                   s.tutorId === bookModal.tutor.uid &&
                   s.startTime === bookModal.slot.startTime
               )
-              .map((s) => s.scheduledDate.toDate().toISOString().split("T")[0])
+              .map((s) => s.scheduledDate.split("T")[0])
           );
           const alreadyRequested = new Set(
             myRequests
@@ -1323,7 +1284,7 @@ function SessionRow({
   // Show Join only within 15 mins before start and up to 5 mins after end
   const canJoin = useMemo(() => {
     if (!session.meetLink || !isUpcoming) return false;
-    const base = session.scheduledDate.toDate();
+    const base = new Date(session.scheduledDate);
     const [sh, sm] = (session.startTime ?? "00:00").split(":").map(Number);
     const [eh, em] = (session.endTime   ?? "00:00").split(":").map(Number);
     const startMs = new Date(base.getFullYear(), base.getMonth(), base.getDate(), sh, sm).getTime();
@@ -1334,7 +1295,7 @@ function SessionRow({
   // How many minutes until the Join window opens (for tooltip / disabled hint)
   const minsUntilJoin = useMemo(() => {
     if (!session.meetLink || !isUpcoming) return null;
-    const base = session.scheduledDate.toDate();
+    const base = new Date(session.scheduledDate);
     const [sh, sm] = (session.startTime ?? "00:00").split(":").map(Number);
     const startMs = new Date(base.getFullYear(), base.getMonth(), base.getDate(), sh, sm).getTime();
     const diff = Math.ceil((startMs - 15 * 60 * 1000 - now) / 60_000);
@@ -1353,7 +1314,7 @@ function SessionRow({
         <div className="flex items-center gap-3 text-xs text-gray-500">
           <span className="flex items-center gap-1">
             <Calendar className="w-3 h-3" />
-            {format(session.scheduledDate.toDate(), "EEE, MMM d")}
+            {format(new Date(session.scheduledDate), "EEE, MMM d")}
           </span>
           <span>{session.startTime}--{session.endTime}</span>
           <span className="flex items-center gap-1">

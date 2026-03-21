@@ -1,11 +1,11 @@
 // src/lib/school-context.tsx
-// Provides the current user's school doc (logo, name, campus, brandColor)
-// to all authenticated pages via React context.
+// Provides the current user's school doc to all authenticated pages via React context.
+// Uses polling instead of Firestore onSnapshot.
 
-import React, { createContext, useContext, useEffect, useState } from "react";
-import { onSnapshot, doc } from "firebase/firestore";
-import { db } from "./firebase";
+import React, { createContext, useContext } from "react";
 import { useAuth } from "./auth-context";
+import { getSchoolDoc } from "./api-queries";
+import { usePoll } from "./use-poll";
 import type { SchoolDoc } from "./types";
 
 interface SchoolContextValue {
@@ -20,31 +20,13 @@ const SchoolContext = createContext<SchoolContextValue>({
 
 export function SchoolProvider({ children }: { children: React.ReactNode }) {
   const { currentUser } = useAuth();
-  const [school, setSchool] = useState<SchoolDoc | null>(null);
-  const [loading, setLoading] = useState(true);
+  const domain = currentUser?.schoolDomain;
 
-  useEffect(() => {
-    if (!currentUser?.schoolDomain) {
-      setSchool(null);
-      setLoading(false);
-      return;
-    }
-
-    const unsub = onSnapshot(
-      doc(db, "schools", currentUser.schoolDomain),
-      (snap) => {
-        setSchool(snap.exists() ? (snap.data() as SchoolDoc) : null);
-        setLoading(false);
-      },
-      () => {
-        // On error, fail gracefully
-        setSchool(null);
-        setLoading(false);
-      }
-    );
-
-    return unsub;
-  }, [currentUser?.schoolDomain]);
+  const { data: school, loading } = usePoll(
+    () => (domain ? getSchoolDoc(domain) : Promise.resolve(null)),
+    [domain],
+    { intervalMs: 60_000, enabled: !!domain },
+  );
 
   return (
     <SchoolContext.Provider value={{ school, loading }}>
