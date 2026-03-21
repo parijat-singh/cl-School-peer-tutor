@@ -4,6 +4,7 @@ import { useAuth } from "@/lib/auth-context";
 import { subscribeAllSchools, subscribeAllSuperAdmins, usersCol } from "@/lib/firestore";
 import { updatePassword, reauthenticateWithCredential, EmailAuthProvider } from "firebase/auth";
 import { auth } from "@/lib/firebase";
+import { adminSetClaims } from "@/lib/functions";
 import {
   Button, Input, Select, Modal, Toast, Badge, Divider,
 } from "@/components/shared/ui";
@@ -14,20 +15,6 @@ import {
   Crown, CheckCircle, XCircle, Trash2,
   UserPlus, Building, Plus, RefreshCw, Pencil, Shield, KeyRound,
 } from "lucide-react";
-
-const projectId = import.meta.env.VITE_FIREBASE_PROJECT_ID || "peertutor-dev";
-const emulatorHost = import.meta.env.VITE_EMULATOR_HOST || "localhost";
-
-async function updateCustomClaims(uid: string, claims: Record<string, unknown>) {
-  await fetch(
-    `http://${emulatorHost}:9099/identitytoolkit.googleapis.com/v1/projects/${projectId}/accounts:update`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": "Bearer owner" },
-      body: JSON.stringify({ localId: uid, customAttributes: JSON.stringify(claims) }),
-    }
-  );
-}
 
 // Derive effective status from school doc (backward compat: old docs lack `status` field)
 function getSchoolStatus(school: SchoolDoc): SchoolStatus {
@@ -127,11 +114,7 @@ export default function SuperAdminDashboard() {
             schoolDomain: domain,
             updatedAt: serverTimestamp(),
           });
-          await updateCustomClaims(adminUid, {
-            role: "schooladmin",
-            schoolDomain: domain,
-            status: "active",
-          });
+          await adminSetClaims({ targetUid: adminUid, claims: { role: "schooladmin", schoolDomain: domain, status: "active" } });
         }
       }
 
@@ -251,11 +234,7 @@ export default function SuperAdminDashboard() {
         status: "active",
         updatedAt: serverTimestamp(),
       });
-      await updateCustomClaims(targetUid, {
-        role: "schooladmin",
-        schoolDomain: targetDomain,
-        status: "active",
-      });
+      await adminSetClaims({ targetUid, claims: { role: "schooladmin", schoolDomain: targetDomain, status: "active" } });
       await addDoc(collection(db, "adminAuditLog"), {
         adminUid: currentUser.uid,
         action: "promote_schooladmin",

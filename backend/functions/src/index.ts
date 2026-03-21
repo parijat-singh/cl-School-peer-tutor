@@ -29,6 +29,7 @@ export { approveSchool }        from "./schools/approveSchool";
 export { rejectSchool }         from "./schools/rejectSchool";
 export { removeSchool }         from "./schools/removeSchool";
 export { promoteSuperAdmin }      from "./auth/promoteSuperAdmin";
+export { adminSetClaims }         from "./auth/adminSetClaims";
 export { updateTutorProfile }     from "./auth/updateTutorProfile";
 export { recommendTutors }        from "./recommendations/recommendTutors";
 export { sendVerificationOtp }    from "./auth/sendVerificationOtp";

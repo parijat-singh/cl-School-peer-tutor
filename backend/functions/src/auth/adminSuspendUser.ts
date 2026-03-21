@@ -55,8 +55,13 @@ export const adminSuspendUser = functions.onCall(
       });
     });
 
-    // Disable Firebase Auth account
+    // Disable Firebase Auth account and sync claims
     await auth.updateUser(targetUid, { disabled: true });
+    await auth.setCustomUserClaims(targetUid, {
+      role: target.role,
+      schoolDomain: target.schoolDomain,
+      status: "suspended",
+    });
 
     // Cancel all upcoming sessions for this user
     const upcomingSessions = await db.collection("sessions")
@@ -116,6 +121,11 @@ export const adminUnsuspendUser = functions.onCall(
     });
 
     await auth.updateUser(targetUid, { disabled: false });
+    await auth.setCustomUserClaims(targetUid, {
+      role: target.role,
+      schoolDomain: target.schoolDomain,
+      status: "active",
+    });
     return { success: true };
   }
 );

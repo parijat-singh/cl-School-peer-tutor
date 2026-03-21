@@ -7,7 +7,7 @@ import {
   getSchoolDoc, uploadSchoolLogo, updateSchoolProfile,
 } from "@/lib/firestore";
 import { SchoolBanner } from "@/components/shared/SchoolBanner";
-// Direct Firestore writes (Cloud Functions don't work in emulator)
+import { adminSetClaims } from "@/lib/functions";
 import {
   Button, Input, Select, Modal, Toast, Badge, Divider,
 } from "@/components/shared/ui";
@@ -20,19 +20,6 @@ import {
   Upload, GraduationCap,
 } from "lucide-react";
 
-const projectId = import.meta.env.VITE_FIREBASE_PROJECT_ID || "peertutor-dev";
-const emulatorHost = import.meta.env.VITE_EMULATOR_HOST || "localhost";
-
-async function updateCustomClaims(uid: string, claims: Record<string, unknown>) {
-  await fetch(
-    `http://${emulatorHost}:9099/identitytoolkit.googleapis.com/v1/projects/${projectId}/accounts:update`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": "Bearer owner" },
-      body: JSON.stringify({ localId: uid, customAttributes: JSON.stringify(claims) }),
-    }
-  );
-}
 import { format } from "date-fns";
 
 export default function AdminDashboard() {
@@ -135,11 +122,7 @@ export default function AdminDashboard() {
         schoolDomain: domain,
         timestamp: serverTimestamp(),
       });
-      await updateCustomClaims(target.uid, {
-        role: "schooladmin",
-        schoolDomain: domain,
-        status: "active",
-      });
+      await adminSetClaims({ targetUid: target.uid, claims: { role: "schooladmin", schoolDomain: domain, status: "active" } });
       setToast({ msg: `${target.name} promoted to school admin`, type: "success" });
     } catch {
       setToast({ msg: "Failed to promote user", type: "error" });
@@ -162,11 +145,7 @@ export default function AdminDashboard() {
         schoolDomain: domain,
         timestamp: serverTimestamp(),
       });
-      await updateCustomClaims(removeAdminModal.uid, {
-        role: "tutor",
-        schoolDomain: domain,
-        status: removeAdminModal.status,
-      });
+      await adminSetClaims({ targetUid: removeAdminModal.uid, claims: { role: "tutor", schoolDomain: domain, status: removeAdminModal.status } });
       setToast({ msg: `${removeAdminModal.name} removed as school admin`, type: "success" });
     } catch {
       setToast({ msg: "Failed to remove admin", type: "error" });
@@ -195,11 +174,7 @@ export default function AdminDashboard() {
         status: "active",
         updatedAt: serverTimestamp(),
       });
-      await updateCustomClaims(user.uid, {
-        role: user.role,
-        schoolDomain: user.schoolDomain,
-        status: "active",
-      });
+      await adminSetClaims({ targetUid: user.uid, claims: { role: user.role, schoolDomain: user.schoolDomain, status: "active" } });
       await addDoc(collection(db, "adminAuditLog"), {
         adminUid: currentUser.uid,
         action: "approve_user",
@@ -220,11 +195,7 @@ export default function AdminDashboard() {
         status: "suspended",
         updatedAt: serverTimestamp(),
       });
-      await updateCustomClaims(suspendModal.uid, {
-        role: suspendModal.role,
-        schoolDomain: suspendModal.schoolDomain,
-        status: "suspended",
-      });
+      await adminSetClaims({ targetUid: suspendModal.uid, claims: { role: suspendModal.role, schoolDomain: suspendModal.schoolDomain, status: "suspended" } });
       await addDoc(collection(db, "adminAuditLog"), {
         adminUid: currentUser.uid,
         action: "suspend_user",
@@ -249,11 +220,7 @@ export default function AdminDashboard() {
         status: "active",
         updatedAt: serverTimestamp(),
       });
-      await updateCustomClaims(user.uid, {
-        role: user.role,
-        schoolDomain: user.schoolDomain,
-        status: "active",
-      });
+      await adminSetClaims({ targetUid: user.uid, claims: { role: user.role, schoolDomain: user.schoolDomain, status: "active" } });
       await addDoc(collection(db, "adminAuditLog"), {
         adminUid: currentUser.uid,
         action: "unsuspend_user",

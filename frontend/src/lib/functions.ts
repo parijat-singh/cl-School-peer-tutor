@@ -43,6 +43,11 @@ export const unsuspendUser = httpsCallable<
   { success: boolean }
 >(fns, "adminUnsuspendUser");
 
+export const adminSetClaims = httpsCallable<
+  { targetUid: string; claims: { role: string; schoolDomain: string | null; status: string } },
+  { success: boolean }
+>(fns, "adminSetClaims");
+
 export const exportSessions = httpsCallable<
   { schoolDomain: string },
   { csvUrl: string }
