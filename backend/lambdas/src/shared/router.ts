@@ -28,8 +28,18 @@ type RouteMap = Record<string, HandlerFn>;
  */
 export function createRouter(routes: RouteMap) {
   return async (event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> => {
-    const routeKey = event.routeKey; // e.g. "POST /auth/initialize-user"
-    const handler = routes[routeKey];
+    // API Gateway sends routeKey like "POST /contact/{proxy+}" for catch-all routes.
+    // Try exact match first, then resolve using the actual HTTP method + path.
+    const routeKey = event.routeKey; // e.g. "POST /contact/{proxy+}"
+    let handler = routes[routeKey];
+
+    if (!handler) {
+      // Build resolved key from method + actual path (e.g. "POST /contact/submit")
+      const method = event.requestContext?.http?.method ?? routeKey.split(" ")[0];
+      const path = event.rawPath ?? routeKey.split(" ")[1];
+      const resolvedKey = `${method} ${path}`;
+      handler = routes[resolvedKey];
+    }
 
     if (!handler) {
       return error(404, `No handler for route: ${routeKey}`);

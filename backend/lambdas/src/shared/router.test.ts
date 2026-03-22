@@ -66,6 +66,40 @@ describe("createRouter", () => {
     consoleSpy.mockRestore();
   });
 
+  it("resolves proxy+ routes using rawPath fallback", async () => {
+    const handler = vi.fn().mockResolvedValue({ statusCode: 200, body: "ok" });
+    const router = createRouter({ "POST /contact/submit": handler });
+
+    const event = makeEvent({
+      routeKey: "POST /contact/{proxy+}",
+      rawPath: "/contact/submit",
+      requestContext: {
+        http: { method: "POST", path: "/contact/submit" },
+        authorizer: { jwt: { claims: { sub: "u1" }, scopes: [] } },
+      } as any,
+    });
+
+    const result = await router(event);
+    expect(handler).toHaveBeenCalledOnce();
+    expect(result).toEqual({ statusCode: 200, body: "ok" });
+  });
+
+  it("returns 404 when proxy+ route does not match any handler", async () => {
+    const router = createRouter({ "POST /contact/submit": vi.fn() });
+
+    const event = makeEvent({
+      routeKey: "POST /contact/{proxy+}",
+      rawPath: "/contact/nonexistent",
+      requestContext: {
+        http: { method: "POST", path: "/contact/nonexistent" },
+        authorizer: { jwt: { claims: { sub: "u1" }, scopes: [] } },
+      } as any,
+    });
+
+    const result = await router(event);
+    expect(result.statusCode).toBe(404);
+  });
+
   it("does not treat 5xx statusCode errors as application errors", async () => {
     const handler = vi.fn().mockRejectedValue(
       Object.assign(new Error("Server broke"), { statusCode: 500 }),
