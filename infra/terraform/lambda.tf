@@ -1,8 +1,11 @@
 # PeerTutor — Lambda functions for API backend
 # Six handler groups deployed from S3 zips built in CI.
 
+# Uses the frontend S3 bucket (or a custom one) for Lambda deployment zips.
+
 locals {
-  lambda_groups = toset(["auth", "bookings", "schools", "reviews", "misc", "scheduled"])
+  lambda_deploy_bucket = var.lambda_deploy_bucket != "" ? var.lambda_deploy_bucket : aws_s3_bucket.frontend.id
+  lambda_groups        = toset(["auth", "bookings", "schools", "reviews", "misc", "scheduled"])
 
   lambda_environment = {
     NODE_OPTIONS = "--enable-source-maps"
@@ -158,8 +161,9 @@ resource "aws_lambda_function" "handlers" {
   memory_size   = each.key == "scheduled" ? 128 : 256
   timeout       = each.key == "scheduled" ? 300 : 30
 
-  s3_bucket = var.lambda_deploy_bucket
-  s3_key    = "lambdas/${each.key}.zip"
+  # Initial deploy uses local zip files; CD pipeline updates via S3 afterward.
+  filename         = "${path.module}/../../backend/lambdas/dist/${each.key}.zip"
+  source_code_hash = filebase64sha256("${path.module}/../../backend/lambdas/dist/${each.key}.zip")
 
   environment {
     variables = local.lambda_environment
@@ -171,7 +175,7 @@ resource "aws_lambda_function" "handlers" {
     aws_cloudwatch_log_group.lambda_logs,
   ]
 
-  lifecycle { ignore_changes = [s3_key, s3_object_version] }
+  lifecycle { ignore_changes = [filename, source_code_hash, s3_bucket, s3_key, s3_object_version] }
 }
 
 # ── CloudWatch Log Groups ────────────────────────────────────────────────────

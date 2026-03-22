@@ -237,6 +237,15 @@ resource "aws_iam_user_policy" "github_deploy" {
           "cloudfront:GetInvalidation"
         ]
         Resource = aws_cloudfront_distribution.frontend.arn
+      },
+      {
+        Sid    = "LambdaDeploy"
+        Effect = "Allow"
+        Action = [
+          "lambda:UpdateFunctionCode",
+          "lambda:GetFunction"
+        ]
+        Resource = [for fn in aws_lambda_function.handlers : fn.arn]
       }
     ]
   })

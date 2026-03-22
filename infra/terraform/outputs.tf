@@ -103,3 +103,8 @@ output "logos_bucket_name" {
   description = "S3 bucket name for school logo uploads"
   value       = aws_s3_bucket.logos.id
 }
+
+output "lambda_deploy_bucket" {
+  description = "S3 bucket for Lambda deployment zips (set as LAMBDA_DEPLOY_BUCKET GitHub secret)"
+  value       = local.lambda_deploy_bucket
+}

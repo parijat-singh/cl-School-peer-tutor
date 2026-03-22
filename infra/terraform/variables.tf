@@ -81,8 +81,9 @@ variable "tags" {
 # ── Backend / Lambda variables ───────────────────────────────────────────────
 
 variable "lambda_deploy_bucket" {
-  description = "S3 bucket name that holds Lambda deployment zips (lambdas/{group}.zip)"
+  description = "S3 bucket name that holds Lambda deployment zips (lambdas/{group}.zip). Leave empty to auto-create."
   type        = string
+  default     = ""
 }
 
 variable "sentry_dsn" {
