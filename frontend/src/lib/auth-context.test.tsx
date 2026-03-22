@@ -1,32 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 
-vi.mock("firebase/auth", () => ({
-  onAuthStateChanged: vi.fn(),
-  signInWithEmailAndPassword: vi.fn(),
-  createUserWithEmailAndPassword: vi.fn(),
-  signOut: vi.fn(),
-  sendPasswordResetEmail: vi.fn(),
-}));
-
-vi.mock("firebase/firestore", () => ({
-  doc: vi.fn(),
-  setDoc: vi.fn(),
-  getDoc: vi.fn(),
-  serverTimestamp: vi.fn(),
-}));
-
-vi.mock("firebase/functions", () => ({
-  getFunctions: vi.fn(() => ({})),
-  httpsCallable: vi.fn(() => vi.fn()),
-}));
-
-vi.mock("./firebase", () => ({
-  auth: { currentUser: null },
-  db: {},
-}));
-
-vi.mock("./firestore", () => ({
+vi.mock("./api-queries", () => ({
   getUserDoc: vi.fn().mockResolvedValue(null),
+  getMe: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("./cognito-auth", () => ({
@@ -41,8 +17,9 @@ vi.mock("./cognito-auth", () => ({
   decodeIdToken: vi.fn(),
 }));
 
-vi.mock("./callable", () => ({
-  callFunction: vi.fn(),
+vi.mock("./api", () => ({
+  setTokenGetter: vi.fn(),
+  api: { get: vi.fn(), post: vi.fn() },
 }));
 
 import { extractDomain } from "./auth-context";

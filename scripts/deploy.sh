@@ -2,14 +2,12 @@
 # =============================================================================
 # PeerTutor — Production Deploy Script
 #
-# Secrets never leave your machine. This script reads .env.production locally,
-# builds the frontend, and deploys to AWS S3 + CloudFront + Firebase.
+# Builds the frontend and deploys to AWS S3 + CloudFront.
+# Lambda functions are deployed via GitHub Actions CD pipeline.
 #
 # Prerequisites (one-time setup):
 #   1. aws configure --profile schoolpeertutor
-#   2. firebase login  (then firebase use peertutor-prod)
-#   3. cp .env.production.example .env.production  and fill in your values
-#   4. npm install -g firebase-tools@13
+#   2. cp .env.production.example .env.production  and fill in your values
 #
 # Usage:
 #   bash scripts/deploy.sh
@@ -41,15 +39,12 @@ info "Loaded .env.production"
 
 # ── Validate required vars ────────────────────────────────────────────────────
 required_vars=(
-  FIREBASE_PROJECT_ID
-  FIREBASE_API_KEY
-  FIREBASE_AUTH_DOMAIN
-  FIREBASE_STORAGE_BUCKET
-  FIREBASE_MESSAGING_SENDER_ID
-  FIREBASE_APP_ID
   S3_BUCKET
   CLOUDFRONT_DISTRIBUTION_ID
   AWS_PROFILE
+  VITE_API_URL
+  VITE_COGNITO_USER_POOL_ID
+  VITE_COGNITO_CLIENT_ID
 )
 for var in "${required_vars[@]}"; do
   [ -z "${!var:-}" ] && error "Missing required variable: $var  (check .env.production)"
@@ -57,10 +52,9 @@ done
 info "All required variables present ✅"
 
 # ── Check tools are installed ────────────────────────────────────────────────
-command -v aws      >/dev/null 2>&1 || error "aws CLI not installed. https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html"
-command -v firebase >/dev/null 2>&1 || error "firebase CLI not installed. Run: npm install -g firebase-tools@13"
-command -v node     >/dev/null 2>&1 || error "node not installed."
-command -v npm      >/dev/null 2>&1 || error "npm not installed."
+command -v aws  >/dev/null 2>&1 || error "aws CLI not installed. https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html"
+command -v node >/dev/null 2>&1 || error "node not installed."
+command -v npm  >/dev/null 2>&1 || error "npm not installed."
 
 # ── Check AWS credentials work ───────────────────────────────────────────────
 info "Verifying AWS credentials (profile: $AWS_PROFILE)..."
@@ -108,15 +102,7 @@ info "Building frontend..."
 cd "$(dirname "$0")/../frontend"
 
 npm ci --prefer-offline
-
-VITE_FIREBASE_API_KEY="$FIREBASE_API_KEY" \
-VITE_FIREBASE_AUTH_DOMAIN="$FIREBASE_AUTH_DOMAIN" \
-VITE_FIREBASE_PROJECT_ID="$FIREBASE_PROJECT_ID" \
-VITE_FIREBASE_STORAGE_BUCKET="$FIREBASE_STORAGE_BUCKET" \
-VITE_FIREBASE_MESSAGING_SENDER_ID="$FIREBASE_MESSAGING_SENDER_ID" \
-VITE_FIREBASE_APP_ID="$FIREBASE_APP_ID" \
-VITE_USE_EMULATORS="false" \
-  npm run build
+npm run build
 
 success "Frontend built → frontend/dist/"
 cd ..
@@ -126,7 +112,7 @@ echo ""
 echo -e "${YELLOW}About to deploy to production:${NC}"
 echo "  S3 bucket:     s3://$S3_BUCKET"
 echo "  CloudFront:    $CLOUDFRONT_DISTRIBUTION_ID"
-echo "  Firebase:      $FIREBASE_PROJECT_ID"
+echo "  API:           $VITE_API_URL"
 echo "  Domain:        https://schoolpeertutor.com"
 echo ""
 read -r -p "Deploy now? [y/N] " confirm
@@ -161,18 +147,6 @@ INVALIDATION_ID=$(aws cloudfront create-invalidation \
   --output text)
 success "CloudFront invalidation created: $INVALIDATION_ID"
 info "CDN will be fully updated within ~60 seconds"
-
-# ── Deploy Firebase Functions + Firestore rules ──────────────────────────────
-info "Deploying Firebase Functions and Firestore rules..."
-cd backend
-
-firebase deploy \
-  --only functions,firestore:rules,storage \
-  --project "$FIREBASE_PROJECT_ID" \
-  --non-interactive
-
-success "Firebase deploy complete"
-cd ..
 
 # ── Done ─────────────────────────────────────────────────────────────────────
 echo ""

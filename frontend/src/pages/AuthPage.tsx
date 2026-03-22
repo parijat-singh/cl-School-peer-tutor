@@ -80,7 +80,7 @@ function mapAuthError(err: unknown): string {
   if (name === "LimitExceededException") return "Too many attempts. Please try again later.";
   if (name === "InvalidPasswordException") return "Password does not meet requirements.";
 
-  // Firebase errors (legacy fallback)
+  // Cognito auth error fallbacks
   if (code === "auth/user-not-found" || code === "auth/wrong-password" || code === "auth/invalid-credential") {
     return "Incorrect email or password.";
   }

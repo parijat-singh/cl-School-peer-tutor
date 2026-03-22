@@ -9,14 +9,11 @@ services:
   frontend:
     build:
       target: production
-    environment:
-      - VITE_USE_EMULATORS=false
     ports:
       - "5173:80"  # Nginx serves built assets inside container
 
-  firebase-emulators:
-    # In production, remove the emulators — deploy to real Firebase
-    # This service is intentionally excluded from prod
+  dynamodb-local:
+    # In production, use real DynamoDB — exclude local from prod
     profiles:
       - dev-only
 

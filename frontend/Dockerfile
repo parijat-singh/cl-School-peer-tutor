@@ -6,7 +6,7 @@
 # ─────────────────────────────────────────────────────────────────
 
 # ── Stage 1: Development ─────────────────────────────────────────
-FROM node:20-alpine AS development
+FROM node:22-alpine AS development
 WORKDIR /app
 
 # Install deps first (layer cache)
@@ -19,7 +19,7 @@ EXPOSE 5173
 CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
 
 # ── Stage 2: Builder ─────────────────────────────────────────────
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 WORKDIR /app
 
 COPY package.json package-lock.json ./
@@ -28,13 +28,12 @@ RUN npm ci
 COPY . .
 
 # Build args become VITE_ env vars at build time
-ARG VITE_FIREBASE_API_KEY
-ARG VITE_FIREBASE_AUTH_DOMAIN
-ARG VITE_FIREBASE_PROJECT_ID
-ARG VITE_FIREBASE_STORAGE_BUCKET
-ARG VITE_FIREBASE_MESSAGING_SENDER_ID
-ARG VITE_FIREBASE_APP_ID
-ARG VITE_USE_EMULATORS=false
+ARG VITE_API_URL
+ARG VITE_COGNITO_USER_POOL_ID
+ARG VITE_COGNITO_CLIENT_ID
+ARG VITE_AWS_REGION=us-east-1
+ARG VITE_SENTRY_DSN
+ARG VITE_RECAPTCHA_SITE_KEY
 
 RUN npm run build
 

@@ -1,8 +1,5 @@
 {
   "scripts": {
     "count-tests": "node scripts/count-tests.mjs"
-  },
-  "dependencies": {
-    "firebase": "^12.10.0"
   }
 }

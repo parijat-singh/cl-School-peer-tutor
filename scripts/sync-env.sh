@@ -114,7 +114,7 @@ fi
 # ── Sanitize values — strip secrets from .env.example ────────────
 
 # List of keys whose values are safe to keep as examples/defaults
-SAFE_KEYS="FIREBASE_AUTH_DOMAIN|FIREBASE_STORAGE_BUCKET|SENDGRID_FROM_EMAIL|SENDGRID_FROM_NAME|GOOGLE_CALENDAR_ID|SUPER_ADMIN_EMAIL|DOMAIN|NODE_ENV"
+SAFE_KEYS="GOOGLE_CALENDAR_ID|SUPER_ADMIN_EMAIL|DOMAIN|NODE_ENV|VITE_AWS_REGION"
 
 if [ -f "$EXAMPLE_FILE" ]; then
   tmp_file="$EXAMPLE_FILE.tmp"
@@ -134,9 +134,7 @@ if [ -f "$EXAMPLE_FILE" ]; then
     if [[ "$key" =~ ^($SAFE_KEYS)$ ]]; then
       # Replace real values with generic placeholders
       case "$key" in
-        FIREBASE_AUTH_DOMAIN)     val="your-project.firebaseapp.com" ;;
-        FIREBASE_STORAGE_BUCKET)  val="your-project.appspot.com" ;;
-        SENDGRID_FROM_EMAIL)      val="noreply@yourdomain.com" ;;
+        VITE_AWS_REGION)          val="us-east-1" ;;
         SENDGRID_FROM_NAME)       val="${val:-PeerTutor}" ;;
         GOOGLE_CALENDAR_ID)       val="${val:-primary}" ;;
         SUPER_ADMIN_EMAIL)        val="admin@yourdomain.com" ;;

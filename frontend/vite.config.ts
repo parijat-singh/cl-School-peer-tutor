@@ -16,10 +16,8 @@ export default defineConfig({
       include: ["src/lib/**/*.ts"],
       exclude: [
         "**/*.test.*", "**/*.d.ts", "**/vite-env.d.ts",
-        "src/lib/firebase.ts",
         "src/lib/cognito.ts",
         "src/lib/cognito-auth.ts",
-        "src/lib/callable.ts",
       ],
       thresholds: {
         statements: 80,
@@ -41,14 +39,6 @@ export default defineConfig({
   server: {
     host: "0.0.0.0",
     port: 5173,
-    proxy: {
-      // Proxy Firebase Functions calls in dev
-      "/api": {
-        target: "http://firebase-emulators:5001",
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, ""),
-      },
-    },
   },
   build: {
     rollupOptions: {
@@ -56,7 +46,6 @@ export default defineConfig({
         // Code-split by route for performance
         manualChunks: {
           vendor: ["react", "react-dom", "react-router-dom"],
-          firebase: ["firebase/app", "firebase/auth", "firebase/firestore"],
           forms: ["react-hook-form", "zod", "@hookform/resolvers"],
         },
       },
