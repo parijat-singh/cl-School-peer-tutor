@@ -143,6 +143,7 @@ variable "smtp_from_name" {
 variable "super_admin_email" {
   description = "Email address of the super admin user"
   type        = string
+  default     = ""
 }
 
 variable "google_calendar_client_email" {
