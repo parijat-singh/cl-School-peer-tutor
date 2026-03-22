@@ -1,9 +1,9 @@
 # PeerTutor — S3 bucket for school logos (publicly readable)
 
 resource "aws_s3_bucket" "logos" {
-  bucket = "${var.project_name}-logos-${data.aws_caller_identity.current.account_id}"
+  bucket = "${local.name_prefix}-logos-${data.aws_caller_identity.current.account_id}"
 
-  tags = merge(var.tags, { Name = "${var.project_name}-logos" })
+  tags = merge(var.tags, { Name = "${local.name_prefix}-logos" })
 }
 
 # ── Public access settings (logos are publicly readable) ─────────────────────

@@ -5,7 +5,7 @@ locals {
   # Table definitions: key = logical name, value = config
   dynamodb_tables = {
     users = {
-      name      = "${var.project_name}-users"
+      name      = "${local.name_prefix}-users"
       hash_key  = "uid"
       range_key = null
       ttl_attribute = null
@@ -31,7 +31,7 @@ locals {
     }
 
     availability-slots = {
-      name      = "${var.project_name}-availability-slots"
+      name      = "${local.name_prefix}-availability-slots"
       hash_key  = "tutorId"
       range_key = "slotId"
       ttl_attribute = null
@@ -51,7 +51,7 @@ locals {
     }
 
     sessions = {
-      name      = "${var.project_name}-sessions"
+      name      = "${local.name_prefix}-sessions"
       hash_key  = "sessionId"
       range_key = null
       ttl_attribute = null
@@ -84,7 +84,7 @@ locals {
     }
 
     booking-requests = {
-      name      = "${var.project_name}-booking-requests"
+      name      = "${local.name_prefix}-booking-requests"
       hash_key  = "requestId"
       range_key = null
       ttl_attribute = null
@@ -110,7 +110,7 @@ locals {
     }
 
     reviews = {
-      name      = "${var.project_name}-reviews"
+      name      = "${local.name_prefix}-reviews"
       hash_key  = "reviewId"
       range_key = null
       ttl_attribute = null
@@ -136,7 +136,7 @@ locals {
     }
 
     schools = {
-      name      = "${var.project_name}-schools"
+      name      = "${local.name_prefix}-schools"
       hash_key  = "domain"
       range_key = null
       ttl_attribute = null
@@ -147,7 +147,7 @@ locals {
     }
 
     stats = {
-      name      = "${var.project_name}-stats"
+      name      = "${local.name_prefix}-stats"
       hash_key  = "schoolDomain"
       range_key = null
       ttl_attribute = null
@@ -158,7 +158,7 @@ locals {
     }
 
     email-verifications = {
-      name      = "${var.project_name}-email-verifications"
+      name      = "${local.name_prefix}-email-verifications"
       hash_key  = "uid"
       range_key = null
       ttl_attribute = "expiresAt"
@@ -169,7 +169,7 @@ locals {
     }
 
     rate-limits = {
-      name      = "${var.project_name}-rate-limits"
+      name      = "${local.name_prefix}-rate-limits"
       hash_key  = "key"
       range_key = null
       ttl_attribute = "expiresAt"
@@ -180,7 +180,7 @@ locals {
     }
 
     admin-audit-log = {
-      name      = "${var.project_name}-admin-audit-log"
+      name      = "${local.name_prefix}-admin-audit-log"
       hash_key  = "schoolDomain"
       range_key = "timestampLogId"
       ttl_attribute = null
@@ -192,7 +192,7 @@ locals {
     }
 
     contact-submissions = {
-      name      = "${var.project_name}-contact-submissions"
+      name      = "${local.name_prefix}-contact-submissions"
       hash_key  = "submissionId"
       range_key = null
       ttl_attribute = "expiresAt"

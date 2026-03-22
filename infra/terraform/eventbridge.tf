@@ -3,11 +3,11 @@
 # ── Cleanup expired availability slots — daily at 3 AM UTC ──────────────────
 
 resource "aws_cloudwatch_event_rule" "cleanup_expired_slots" {
-  name                = "${var.project_name}-cleanup-expired-slots"
+  name                = "${local.name_prefix}-cleanup-expired-slots"
   description         = "Trigger cleanup of expired availability slots daily at 3 AM UTC"
   schedule_expression = "cron(0 3 * * ? *)"
 
-  tags = merge(var.tags, { Name = "${var.project_name}-cleanup-expired-slots" })
+  tags = merge(var.tags, { Name = "${local.name_prefix}-cleanup-expired-slots" })
 }
 
 resource "aws_cloudwatch_event_target" "cleanup_expired_slots" {
@@ -28,11 +28,11 @@ resource "aws_lambda_permission" "eventbridge_cleanup" {
 # ── Session reminders — every 15 minutes ────────────────────────────────────
 
 resource "aws_cloudwatch_event_rule" "session_reminders" {
-  name                = "${var.project_name}-session-reminders"
+  name                = "${local.name_prefix}-session-reminders"
   description         = "Trigger session reminder checks every 15 minutes"
   schedule_expression = "rate(15 minutes)"
 
-  tags = merge(var.tags, { Name = "${var.project_name}-session-reminders" })
+  tags = merge(var.tags, { Name = "${local.name_prefix}-session-reminders" })
 }
 
 resource "aws_cloudwatch_event_target" "session_reminders" {

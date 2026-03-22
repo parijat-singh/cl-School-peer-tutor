@@ -54,7 +54,7 @@ locals {
 # ── Shared IAM execution role ────────────────────────────────────────────────
 
 resource "aws_iam_role" "lambda_exec" {
-  name = "${var.project_name}-lambda-exec"
+  name = "${local.name_prefix}-lambda-exec"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -65,11 +65,11 @@ resource "aws_iam_role" "lambda_exec" {
     }]
   })
 
-  tags = merge(var.tags, { Name = "${var.project_name}-lambda-exec" })
+  tags = merge(var.tags, { Name = "${local.name_prefix}-lambda-exec" })
 }
 
 resource "aws_iam_role_policy" "lambda_policy" {
-  name = "${var.project_name}-lambda-policy"
+  name = "${local.name_prefix}-lambda-policy"
   role = aws_iam_role.lambda_exec.id
 
   policy = jsonencode({
@@ -152,7 +152,7 @@ resource "aws_iam_role_policy" "lambda_policy" {
 resource "aws_lambda_function" "handlers" {
   for_each = local.lambda_groups
 
-  function_name = "${var.project_name}-${each.key}"
+  function_name = "${local.name_prefix}-${each.key}"
   description   = "PeerTutor ${each.key} handler"
   role          = aws_iam_role.lambda_exec.arn
   runtime       = "nodejs22.x"
@@ -169,7 +169,7 @@ resource "aws_lambda_function" "handlers" {
     variables = local.lambda_environment
   }
 
-  tags = merge(var.tags, { Name = "${var.project_name}-${each.key}" })
+  tags = merge(var.tags, { Name = "${local.name_prefix}-${each.key}" })
 
   depends_on = [
     aws_cloudwatch_log_group.lambda_logs,
@@ -183,10 +183,10 @@ resource "aws_lambda_function" "handlers" {
 resource "aws_cloudwatch_log_group" "lambda_logs" {
   for_each = local.lambda_groups
 
-  name              = "/aws/lambda/${var.project_name}-${each.key}"
+  name              = "/aws/lambda/${local.name_prefix}-${each.key}"
   retention_in_days = 30
 
-  tags = merge(var.tags, { Name = "${var.project_name}-${each.key}-logs" })
+  tags = merge(var.tags, { Name = "${local.name_prefix}-${each.key}-logs" })
 }
 
 # ── API Gateway invoke permission (all groups except scheduled) ──────────────

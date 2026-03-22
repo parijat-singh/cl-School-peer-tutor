@@ -3,7 +3,7 @@
 # ── HTTP API ─────────────────────────────────────────────────────────────────
 
 resource "aws_apigatewayv2_api" "main" {
-  name          = "${var.project_name}-api"
+  name          = "${local.name_prefix}-api"
   protocol_type = "HTTP"
   description   = "PeerTutor backend HTTP API"
 
@@ -14,7 +14,7 @@ resource "aws_apigatewayv2_api" "main" {
     max_age       = 86400
   }
 
-  tags = merge(var.tags, { Name = "${var.project_name}-api" })
+  tags = merge(var.tags, { Name = "${local.name_prefix}-api" })
 }
 
 # ── Cognito JWT Authorizer ───────────────────────────────────────────────────
@@ -53,13 +53,13 @@ resource "aws_apigatewayv2_stage" "default" {
     })
   }
 
-  tags = merge(var.tags, { Name = "${var.project_name}-api-default-stage" })
+  tags = merge(var.tags, { Name = "${local.name_prefix}-api-default-stage" })
 }
 
 resource "aws_cloudwatch_log_group" "apigw_access_logs" {
-  name              = "/aws/apigateway/${var.project_name}-api"
+  name              = "/aws/apigateway/${local.name_prefix}-api"
   retention_in_days = 30
-  tags              = merge(var.tags, { Name = "${var.project_name}-api-logs" })
+  tags              = merge(var.tags, { Name = "${local.name_prefix}-api-logs" })
 }
 
 # ── Lambda integrations (one per non-scheduled handler group) ────────────────
