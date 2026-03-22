@@ -134,6 +134,7 @@ jobs:
         run: bash scripts/build-lambdas.sh
 
       - name: Upload Lambda zips to S3
+        if: ${{ secrets.LAMBDA_DEPLOY_BUCKET != '' }}
         env:
           LAMBDA_BUCKET: ${{ secrets.LAMBDA_DEPLOY_BUCKET }}
         run: |
@@ -144,12 +145,12 @@ jobs:
           done
 
       - name: Update Lambda functions
+        if: ${{ secrets.LAMBDA_DEPLOY_BUCKET != '' }}
         env:
           LAMBDA_BUCKET: ${{ secrets.LAMBDA_DEPLOY_BUCKET }}
           LAMBDA_PREFIX: ${{ secrets.LAMBDA_PREFIX || 'peertutor' }}
         run: |
-          GROUPS="auth bookings schools reviews misc scheduled"
-          for group in $GROUPS; do
+          for group in auth bookings schools reviews misc scheduled; do
             FUNC_NAME="${LAMBDA_PREFIX}-${group}"
             echo "Updating $FUNC_NAME..."
             aws lambda update-function-code \
@@ -160,6 +161,10 @@ jobs:
               --output text || echo "::warning::Failed to update $FUNC_NAME"
           done
           echo "Lambda deploy complete"
+
+      - name: Skip Lambda deploy (not configured)
+        if: ${{ secrets.LAMBDA_DEPLOY_BUCKET == '' }}
+        run: echo "::notice::Skipping Lambda deploy — set LAMBDA_DEPLOY_BUCKET secret to enable"
 
       # ── Notify success ────────────────────────────────────────────────────
       - name: Send deployment success email
