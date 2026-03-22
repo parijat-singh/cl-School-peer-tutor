@@ -24,7 +24,9 @@ locals {
   name_prefix  = var.environment == "production" ? var.project_name : "${var.project_name}-${var.environment}"
   bucket_name  = "${local.name_prefix}-frontend-${data.aws_caller_identity.current.account_id}"
   acm_arn_for_cloudfront = var.acm_certificate_arn != "" ? var.acm_certificate_arn : (
-    length(aws_acm_certificate_validation.frontend) > 0 ? aws_acm_certificate_validation.frontend[0].certificate_arn : ""
+    length(aws_acm_certificate_validation.frontend) > 0 ? aws_acm_certificate_validation.frontend[0].certificate_arn : (
+      length(aws_acm_certificate.frontend) > 0 ? aws_acm_certificate.frontend[0].arn : ""
+    )
   )
   use_tls_aliases = var.enable_custom_domain && var.domain_name != "" && local.acm_arn_for_cloudfront != ""
   cloudfront_aliases = local.use_tls_aliases ? [var.domain_name, "www.${var.domain_name}"] : []
