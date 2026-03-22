@@ -21,7 +21,7 @@ provider "aws" {
 data "aws_caller_identity" "current" {}
 
 locals {
-  name_prefix  = var.project_name
+  name_prefix  = var.environment == "production" ? var.project_name : "${var.project_name}-${var.environment}"
   bucket_name  = "${local.name_prefix}-frontend-${data.aws_caller_identity.current.account_id}"
   acm_arn_for_cloudfront = var.acm_certificate_arn != "" ? var.acm_certificate_arn : (
     length(aws_acm_certificate_validation.frontend) > 0 ? aws_acm_certificate_validation.frontend[0].certificate_arn : ""

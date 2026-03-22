@@ -1,5 +1,15 @@
 # PeerTutor — AWS infrastructure variables
 
+variable "environment" {
+  description = "Environment name (production or staging)"
+  type        = string
+  default     = "production"
+  validation {
+    condition     = contains(["production", "staging"], var.environment)
+    error_message = "Environment must be 'production' or 'staging'."
+  }
+}
+
 variable "project_name" {
   description = "Project name used for resource naming (e.g. peertutor, schoolpeertutor)"
   type        = string
