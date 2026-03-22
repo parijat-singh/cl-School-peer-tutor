@@ -6,8 +6,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")/../backend/lambdas"
 
-echo "Installing production dependencies..."
-npm ci --omit=dev 2>/dev/null || npm install --omit=dev
+echo "Installing all dependencies (esbuild needed for build)..."
+npm ci 2>/dev/null || npm install
 
 echo "Building Lambda bundles..."
 node esbuild.config.mjs
