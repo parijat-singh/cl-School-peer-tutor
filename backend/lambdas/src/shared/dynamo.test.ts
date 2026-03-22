@@ -13,17 +13,17 @@ describe("dynamo module", () => {
   });
 
   it("exports a DynamoDB Document Client as ddb", async () => {
-    process.env.USERS_TABLE = "users";
-    process.env.AVAILABILITY_TABLE = "availability";
-    process.env.SESSIONS_TABLE = "sessions";
-    process.env.BOOKING_REQUESTS_TABLE = "bookings";
-    process.env.REVIEWS_TABLE = "reviews";
-    process.env.SCHOOLS_TABLE = "schools";
-    process.env.STATS_TABLE = "stats";
-    process.env.EMAIL_VERIFICATIONS_TABLE = "email-verify";
-    process.env.RATE_LIMITS_TABLE = "rate-limits";
-    process.env.ADMIN_AUDIT_LOG_TABLE = "audit-log";
-    process.env.CONTACT_SUBMISSIONS_TABLE = "contact";
+    process.env.DYNAMODB_TABLE_USERS = "users";
+    process.env.DYNAMODB_TABLE_AVAILABILITY_SLOTS = "availability";
+    process.env.DYNAMODB_TABLE_SESSIONS = "sessions";
+    process.env.DYNAMODB_TABLE_BOOKING_REQUESTS = "bookings";
+    process.env.DYNAMODB_TABLE_REVIEWS = "reviews";
+    process.env.DYNAMODB_TABLE_SCHOOLS = "schools";
+    process.env.DYNAMODB_TABLE_STATS = "stats";
+    process.env.DYNAMODB_TABLE_EMAIL_VERIFICATIONS = "email-verify";
+    process.env.DYNAMODB_TABLE_RATE_LIMITS = "rate-limits";
+    process.env.DYNAMODB_TABLE_ADMIN_AUDIT_LOG = "audit-log";
+    process.env.DYNAMODB_TABLE_CONTACT_SUBMISSIONS = "contact";
 
     const { ddb } = await import("./dynamo.js");
     expect(ddb).toBeDefined();
@@ -31,17 +31,17 @@ describe("dynamo module", () => {
   });
 
   it("exports Tables with values from environment variables", async () => {
-    process.env.USERS_TABLE = "my-users";
-    process.env.AVAILABILITY_TABLE = "my-availability";
-    process.env.SESSIONS_TABLE = "my-sessions";
-    process.env.BOOKING_REQUESTS_TABLE = "my-bookings";
-    process.env.REVIEWS_TABLE = "my-reviews";
-    process.env.SCHOOLS_TABLE = "my-schools";
-    process.env.STATS_TABLE = "my-stats";
-    process.env.EMAIL_VERIFICATIONS_TABLE = "my-email-verify";
-    process.env.RATE_LIMITS_TABLE = "my-rate-limits";
-    process.env.ADMIN_AUDIT_LOG_TABLE = "my-audit-log";
-    process.env.CONTACT_SUBMISSIONS_TABLE = "my-contact";
+    process.env.DYNAMODB_TABLE_USERS = "my-users";
+    process.env.DYNAMODB_TABLE_AVAILABILITY_SLOTS = "my-availability";
+    process.env.DYNAMODB_TABLE_SESSIONS = "my-sessions";
+    process.env.DYNAMODB_TABLE_BOOKING_REQUESTS = "my-bookings";
+    process.env.DYNAMODB_TABLE_REVIEWS = "my-reviews";
+    process.env.DYNAMODB_TABLE_SCHOOLS = "my-schools";
+    process.env.DYNAMODB_TABLE_STATS = "my-stats";
+    process.env.DYNAMODB_TABLE_EMAIL_VERIFICATIONS = "my-email-verify";
+    process.env.DYNAMODB_TABLE_RATE_LIMITS = "my-rate-limits";
+    process.env.DYNAMODB_TABLE_ADMIN_AUDIT_LOG = "my-audit-log";
+    process.env.DYNAMODB_TABLE_CONTACT_SUBMISSIONS = "my-contact";
 
     const { Tables } = await import("./dynamo.js");
     expect(Tables.Users).toBe("my-users");
@@ -59,17 +59,17 @@ describe("dynamo module", () => {
 
   it("uses custom endpoint when DYNAMODB_ENDPOINT is set", async () => {
     process.env.DYNAMODB_ENDPOINT = "http://localhost:8000";
-    process.env.USERS_TABLE = "users";
-    process.env.AVAILABILITY_TABLE = "availability";
-    process.env.SESSIONS_TABLE = "sessions";
-    process.env.BOOKING_REQUESTS_TABLE = "bookings";
-    process.env.REVIEWS_TABLE = "reviews";
-    process.env.SCHOOLS_TABLE = "schools";
-    process.env.STATS_TABLE = "stats";
-    process.env.EMAIL_VERIFICATIONS_TABLE = "email-verify";
-    process.env.RATE_LIMITS_TABLE = "rate-limits";
-    process.env.ADMIN_AUDIT_LOG_TABLE = "audit-log";
-    process.env.CONTACT_SUBMISSIONS_TABLE = "contact";
+    process.env.DYNAMODB_TABLE_USERS = "users";
+    process.env.DYNAMODB_TABLE_AVAILABILITY_SLOTS = "availability";
+    process.env.DYNAMODB_TABLE_SESSIONS = "sessions";
+    process.env.DYNAMODB_TABLE_BOOKING_REQUESTS = "bookings";
+    process.env.DYNAMODB_TABLE_REVIEWS = "reviews";
+    process.env.DYNAMODB_TABLE_SCHOOLS = "schools";
+    process.env.DYNAMODB_TABLE_STATS = "stats";
+    process.env.DYNAMODB_TABLE_EMAIL_VERIFICATIONS = "email-verify";
+    process.env.DYNAMODB_TABLE_RATE_LIMITS = "rate-limits";
+    process.env.DYNAMODB_TABLE_ADMIN_AUDIT_LOG = "audit-log";
+    process.env.DYNAMODB_TABLE_CONTACT_SUBMISSIONS = "contact";
 
     const { ddb } = await import("./dynamo.js");
     // The client should still be a valid DynamoDB Document Client

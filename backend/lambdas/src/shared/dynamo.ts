@@ -14,15 +14,15 @@ export const ddb = DynamoDBDocumentClient.from(client, {
 });
 
 export const Tables = {
-  Users:              process.env.USERS_TABLE!,
-  AvailabilitySlots:  process.env.AVAILABILITY_TABLE!,
-  Sessions:           process.env.SESSIONS_TABLE!,
-  BookingRequests:    process.env.BOOKING_REQUESTS_TABLE!,
-  Reviews:            process.env.REVIEWS_TABLE!,
-  Schools:            process.env.SCHOOLS_TABLE!,
-  Stats:              process.env.STATS_TABLE!,
-  EmailVerifications: process.env.EMAIL_VERIFICATIONS_TABLE!,
-  RateLimits:         process.env.RATE_LIMITS_TABLE!,
-  AdminAuditLog:      process.env.ADMIN_AUDIT_LOG_TABLE!,
-  ContactSubmissions: process.env.CONTACT_SUBMISSIONS_TABLE!,
+  Users:              process.env.DYNAMODB_TABLE_USERS!,
+  AvailabilitySlots:  process.env.DYNAMODB_TABLE_AVAILABILITY_SLOTS!,
+  Sessions:           process.env.DYNAMODB_TABLE_SESSIONS!,
+  BookingRequests:    process.env.DYNAMODB_TABLE_BOOKING_REQUESTS!,
+  Reviews:            process.env.DYNAMODB_TABLE_REVIEWS!,
+  Schools:            process.env.DYNAMODB_TABLE_SCHOOLS!,
+  Stats:              process.env.DYNAMODB_TABLE_STATS!,
+  EmailVerifications: process.env.DYNAMODB_TABLE_EMAIL_VERIFICATIONS!,
+  RateLimits:         process.env.DYNAMODB_TABLE_RATE_LIMITS!,
+  AdminAuditLog:      process.env.DYNAMODB_TABLE_ADMIN_AUDIT_LOG!,
+  ContactSubmissions: process.env.DYNAMODB_TABLE_CONTACT_SUBMISSIONS!,
 } as const;

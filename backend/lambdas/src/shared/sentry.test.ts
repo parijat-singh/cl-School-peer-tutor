@@ -1,39 +1,32 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { captureError, Sentry } from "./sentry";
 
-// Mock @sentry/aws-serverless before importing
-vi.mock("@sentry/aws-serverless", () => ({
-  init: vi.fn(),
-  setContext: vi.fn(),
-  captureException: vi.fn(),
-}));
-
-import * as Sentry from "@sentry/aws-serverless";
-import { captureError } from "./sentry";
-
-describe("sentry", () => {
+describe("sentry stub", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("captureError calls Sentry.captureException", () => {
+  it("Sentry is null (stub mode)", () => {
+    expect(Sentry).toBeNull();
+  });
+
+  it("captureError logs to console.error", () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
     const err = new Error("boom");
     captureError(err);
-    expect(Sentry.captureException).toHaveBeenCalledWith(err);
+    expect(spy).toHaveBeenCalledWith("[ERROR]", "", err);
+    spy.mockRestore();
   });
 
-  it("captureError sets context when provided", () => {
+  it("captureError includes context in log output", () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
     const err = new Error("boom");
     captureError(err, { handler: "auth", route: "GET /users/me" });
-    expect(Sentry.setContext).toHaveBeenCalledWith("lambda", {
-      handler: "auth",
-      route: "GET /users/me",
-    });
-    expect(Sentry.captureException).toHaveBeenCalledWith(err);
-  });
-
-  it("captureError does not set context when not provided", () => {
-    captureError("string error");
-    expect(Sentry.setContext).not.toHaveBeenCalled();
-    expect(Sentry.captureException).toHaveBeenCalledWith("string error");
+    expect(spy).toHaveBeenCalledWith(
+      "[ERROR]",
+      JSON.stringify({ handler: "auth", route: "GET /users/me" }),
+      err,
+    );
+    spy.mockRestore();
   });
 });

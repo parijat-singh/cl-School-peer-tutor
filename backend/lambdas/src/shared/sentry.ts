@@ -1,24 +1,9 @@
-// Sentry error tracking for Lambda functions.
-// Uses @sentry/aws-serverless for Lambda-specific instrumentation.
-
-import * as Sentry from "@sentry/aws-serverless";
-
-const dsn = process.env.SENTRY_DSN;
-
-if (dsn) {
-  Sentry.init({
-    dsn,
-    environment: "production",
-    release: process.env.SENTRY_RELEASE,
-    tracesSampleRate: 0.2,
-  });
-}
+// Sentry error tracking stub.
+// @sentry/aws-serverless causes initialization crashes when bundled with esbuild ESM.
+// TODO: Re-add Sentry via Lambda Layer or externalized dependency.
 
 export function captureError(error: unknown, context?: Record<string, unknown>): void {
-  if (context) {
-    Sentry.setContext("lambda", context);
-  }
-  Sentry.captureException(error);
+  console.error("[ERROR]", context ? JSON.stringify(context) : "", error);
 }
 
-export { Sentry };
+export const Sentry = null;

@@ -50,8 +50,19 @@ const TABLES = {
 
 // ── Initialize services ─────────────────────────────────────────
 
+import { readFileSync } from "fs";
+
 if (getApps().length === 0) {
-  initializeApp({ credential: cert(JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON ?? "{}")) });
+  // Support both inline JSON and file path for credentials
+  let credJson: Record<string, unknown>;
+  if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
+    credJson = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
+  } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    credJson = JSON.parse(readFileSync(process.env.GOOGLE_APPLICATION_CREDENTIALS, "utf8"));
+  } else {
+    throw new Error("Set GOOGLE_APPLICATION_CREDENTIALS (file path) or GOOGLE_APPLICATION_CREDENTIALS_JSON (inline)");
+  }
+  initializeApp({ credential: cert(credJson as Parameters<typeof cert>[0]) });
 }
 const firestore = getFirestore();
 const dynamodb = new DynamoDBClient({ region: AWS_REGION });
