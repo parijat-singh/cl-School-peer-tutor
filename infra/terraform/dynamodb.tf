@@ -32,19 +32,19 @@ locals {
 
     availability-slots = {
       name      = "${var.project_name}-availability-slots"
-      hash_key  = "tutorUid"
-      range_key = "id"
+      hash_key  = "tutorId"
+      range_key = "slotId"
       ttl_attribute = null
       attributes = [
-        { name = "tutorUid", type = "S" },
-        { name = "id", type = "S" },
+        { name = "tutorId", type = "S" },
+        { name = "slotId", type = "S" },
         { name = "schoolDomain", type = "S" },
       ]
       global_secondary_indexes = [
         {
           name            = "SchoolDomainIndex"
           hash_key        = "schoolDomain"
-          range_key       = "tutorUid"
+          range_key       = "tutorId"
           projection_type = "ALL"
         },
       ]
@@ -52,25 +52,25 @@ locals {
 
     sessions = {
       name      = "${var.project_name}-sessions"
-      hash_key  = "id"
+      hash_key  = "sessionId"
       range_key = null
       ttl_attribute = null
       attributes = [
-        { name = "id", type = "S" },
-        { name = "tutorUid", type = "S" },
-        { name = "tuteeUid", type = "S" },
+        { name = "sessionId", type = "S" },
+        { name = "tutorId", type = "S" },
+        { name = "tuteeId", type = "S" },
         { name = "schoolDomain", type = "S" },
       ]
       global_secondary_indexes = [
         {
           name            = "TutorIndex"
-          hash_key        = "tutorUid"
+          hash_key        = "tutorId"
           range_key       = null
           projection_type = "ALL"
         },
         {
           name            = "TuteeIndex"
-          hash_key        = "tuteeUid"
+          hash_key        = "tuteeId"
           range_key       = null
           projection_type = "ALL"
         },
@@ -85,24 +85,24 @@ locals {
 
     booking-requests = {
       name      = "${var.project_name}-booking-requests"
-      hash_key  = "id"
+      hash_key  = "requestId"
       range_key = null
       ttl_attribute = null
       attributes = [
-        { name = "id", type = "S" },
-        { name = "tutorUid", type = "S" },
-        { name = "tuteeUid", type = "S" },
+        { name = "requestId", type = "S" },
+        { name = "tutorId", type = "S" },
+        { name = "tuteeId", type = "S" },
       ]
       global_secondary_indexes = [
         {
           name            = "TutorIndex"
-          hash_key        = "tutorUid"
+          hash_key        = "tutorId"
           range_key       = null
           projection_type = "ALL"
         },
         {
           name            = "TuteeIndex"
-          hash_key        = "tuteeUid"
+          hash_key        = "tuteeId"
           range_key       = null
           projection_type = "ALL"
         },
@@ -111,18 +111,18 @@ locals {
 
     reviews = {
       name      = "${var.project_name}-reviews"
-      hash_key  = "id"
+      hash_key  = "reviewId"
       range_key = null
       ttl_attribute = null
       attributes = [
-        { name = "id", type = "S" },
-        { name = "tutorUid", type = "S" },
+        { name = "reviewId", type = "S" },
+        { name = "tutorId", type = "S" },
         { name = "schoolDomain", type = "S" },
       ]
       global_secondary_indexes = [
         {
           name            = "TutorIndex"
-          hash_key        = "tutorUid"
+          hash_key        = "tutorId"
           range_key       = null
           projection_type = "ALL"
         },
@@ -148,22 +148,22 @@ locals {
 
     stats = {
       name      = "${var.project_name}-stats"
-      hash_key  = "domain"
+      hash_key  = "schoolDomain"
       range_key = null
       ttl_attribute = null
       attributes = [
-        { name = "domain", type = "S" },
+        { name = "schoolDomain", type = "S" },
       ]
       global_secondary_indexes = []
     }
 
     email-verifications = {
       name      = "${var.project_name}-email-verifications"
-      hash_key  = "email"
+      hash_key  = "uid"
       range_key = null
       ttl_attribute = "expiresAt"
       attributes = [
-        { name = "email", type = "S" },
+        { name = "uid", type = "S" },
       ]
       global_secondary_indexes = []
     }
@@ -181,23 +181,23 @@ locals {
 
     admin-audit-log = {
       name      = "${var.project_name}-admin-audit-log"
-      hash_key  = "domain"
-      range_key = "timestamp"
+      hash_key  = "schoolDomain"
+      range_key = "timestampLogId"
       ttl_attribute = null
       attributes = [
-        { name = "domain", type = "S" },
-        { name = "timestamp", type = "S" },
+        { name = "schoolDomain", type = "S" },
+        { name = "timestampLogId", type = "S" },
       ]
       global_secondary_indexes = []
     }
 
     contact-submissions = {
       name      = "${var.project_name}-contact-submissions"
-      hash_key  = "id"
+      hash_key  = "submissionId"
       range_key = null
-      ttl_attribute = null
+      ttl_attribute = "expiresAt"
       attributes = [
-        { name = "id", type = "S" },
+        { name = "submissionId", type = "S" },
       ]
       global_secondary_indexes = []
     }

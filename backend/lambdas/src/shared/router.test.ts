@@ -61,7 +61,7 @@ describe("createRouter", () => {
     const result = await router(makeEvent({ routeKey: "GET /test" }));
     expect(result.statusCode).toBe(500);
     const body = JSON.parse(result.body as string);
-    expect(body.error.message).toContain("Internal server error");
+    expect(body.error.message).toBe("Internal server error");
 
     consoleSpy.mockRestore();
   });
@@ -110,7 +110,7 @@ describe("createRouter", () => {
     const result = await router(makeEvent({ routeKey: "GET /test" }));
     expect(result.statusCode).toBe(500);
     const body = JSON.parse(result.body as string);
-    expect(body.error.message).toContain("Internal server error");
+    expect(body.error.message).toBe("Internal server error");
 
     consoleSpy.mockRestore();
   });

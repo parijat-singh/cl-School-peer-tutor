@@ -58,7 +58,7 @@ export function createRouter(routes: RouteMap) {
       // Unexpected errors
       captureError(e, { routeKey });
       console.error("Unhandled error:", e);
-      return error(500, `Internal server error: ${e.message}`);
+      return error(500, "Internal server error");
     }
   };
 }
