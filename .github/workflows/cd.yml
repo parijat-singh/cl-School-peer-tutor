@@ -133,26 +133,27 @@ jobs:
       - name: Build Lambda zips
         run: bash scripts/build-lambdas.sh
 
-      - name: Upload Lambda zips to S3
-        if: ${{ secrets.LAMBDA_DEPLOY_BUCKET != '' }}
-        env:
-          LAMBDA_BUCKET: ${{ secrets.LAMBDA_DEPLOY_BUCKET }}
-        run: |
-          for zip in backend/lambdas/dist/*.zip; do
-            GROUP=$(basename "$zip" .zip)
-            aws s3 cp "$zip" "s3://$LAMBDA_BUCKET/lambdas/$GROUP.zip"
-            echo "Uploaded $GROUP.zip"
-          done
-
-      - name: Update Lambda functions
-        if: ${{ secrets.LAMBDA_DEPLOY_BUCKET != '' }}
+      - name: Deploy Lambda functions
         env:
           LAMBDA_BUCKET: ${{ secrets.LAMBDA_DEPLOY_BUCKET }}
           LAMBDA_PREFIX: ${{ secrets.LAMBDA_PREFIX || 'peertutor' }}
         run: |
+          if [ -z "$LAMBDA_BUCKET" ]; then
+            echo "::notice::Skipping Lambda deploy — set LAMBDA_DEPLOY_BUCKET secret to enable"
+            exit 0
+          fi
+
+          echo "Uploading Lambda zips to S3..."
+          for zip in backend/lambdas/dist/*.zip; do
+            GROUP=$(basename "$zip" .zip)
+            aws s3 cp "$zip" "s3://$LAMBDA_BUCKET/lambdas/$GROUP.zip"
+            echo "  Uploaded $GROUP.zip"
+          done
+
+          echo "Updating Lambda functions..."
           for group in auth bookings schools reviews misc scheduled; do
             FUNC_NAME="${LAMBDA_PREFIX}-${group}"
-            echo "Updating $FUNC_NAME..."
+            echo "  Updating $FUNC_NAME..."
             aws lambda update-function-code \
               --function-name "$FUNC_NAME" \
               --s3-bucket "$LAMBDA_BUCKET" \
@@ -161,10 +162,6 @@ jobs:
               --output text || echo "::warning::Failed to update $FUNC_NAME"
           done
           echo "Lambda deploy complete"
-
-      - name: Skip Lambda deploy (not configured)
-        if: ${{ secrets.LAMBDA_DEPLOY_BUCKET == '' }}
-        run: echo "::notice::Skipping Lambda deploy — set LAMBDA_DEPLOY_BUCKET secret to enable"
 
       # ── Notify success ────────────────────────────────────────────────────
       - name: Send deployment success email
