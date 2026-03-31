@@ -60,3 +60,6 @@ infra/terraform/*.tfstate.*
 infra/terraform/*.tfvars
 !infra/terraform/*.tfvars.example
 infra/terraform/tfplan
+
+# Local test-bed account lists (contain passwords)
+testbed-accounts.csv

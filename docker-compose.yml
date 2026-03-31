@@ -19,7 +19,7 @@ services:
       - ./frontend:/app
       - /app/node_modules
     environment:
-      - VITE_API_URL=http://localhost:3001
+      - VITE_API_URL=${VITE_API_URL}
       - VITE_COGNITO_USER_POOL_ID=${VITE_COGNITO_USER_POOL_ID}
       - VITE_COGNITO_CLIENT_ID=${VITE_COGNITO_CLIENT_ID}
       - VITE_AWS_REGION=${VITE_AWS_REGION:-us-east-1}
