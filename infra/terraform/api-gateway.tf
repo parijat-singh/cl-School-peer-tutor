@@ -93,11 +93,16 @@ locals {
 
     # ── schools handler ──
     "schools-GET /schools"                    = "schools"
-    "schools-GET /schools/{domain}"           = "schools"
+    "schools-GET /schools/{proxy+}"           = "schools"
     "schools-POST /schools/{proxy+}"          = "schools"
     "schools-PATCH /schools/{proxy+}"         = "schools"
     "schools-GET /tutors/{uid}/slots"         = "schools"
     "schools-GET /availability/{proxy+}"      = "schools"
+    "schools-POST /availability/{proxy+}"     = "schools"
+    "schools-DELETE /availability/{proxy+}"   = "schools"
+    "schools-PATCH /availability/{proxy+}"    = "schools"
+    "schools-GET /stats/{proxy+}"             = "schools"
+    "schools-GET /audit-log/{proxy+}"         = "schools"
 
     # ── reviews handler ──
     "reviews-POST /reviews/{proxy+}"          = "reviews"
@@ -106,8 +111,6 @@ locals {
 
     # ── misc handler ──
     "misc-POST /recommendations/{proxy+}"     = "misc"
-    "misc-GET /stats/{proxy+}"                = "misc"
-    "misc-GET /audit-log/{proxy+}"            = "misc"
   }
 
   # Public routes (no JWT authorizer)
