@@ -85,6 +85,38 @@ Compact log of working sessions with key decisions, changes made, open questions
 
 ---
 
+### 2026-04-01 — API Gateway Route Coverage Audit & Regression Tests
+
+- **Session Goal:** Fix "Failed to add slot" error for `tutor1.lincoln@lincoln.edu`, then audit for all routes of the same class and add automated tests to prevent regression
+- **Key Decisions:**
+  - Root cause was entirely in infrastructure (Terraform), not application code. API Gateway returned 404 before Lambda was ever invoked — making the bug invisible in Lambda logs.
+  - Audit strategy: cross-reference every route registered in every Lambda `index.ts` against every route declared in `api-gateway.tf`, applying all three API Gateway v2 matching rules (exact, `{proxy+}`, `{param}`).
+  - Test design: dynamic parsing (no hardcoded route lists) so the test stays in sync automatically as routes are added.
+  - Tests placed in `backend/lambdas/src/handlers/` — auto-discovered by Vitest, no config changes needed.
+- **Changes Made:**
+  - `infra/terraform/api-gateway.tf` — 6 route gaps fixed:
+    - Added `POST /availability/{proxy+}`, `DELETE /availability/{proxy+}`, `PATCH /availability/{proxy+}`
+    - Replaced `GET /schools/{domain}` (exact) with `GET /schools/{proxy+}` (covers all sub-paths)
+    - Added `GET /stats/{proxy+}` and `GET /audit-log/{proxy+}` under `schools` handler
+    - Removed stale `misc` handler entries for stats and audit-log
+  - `backend/lambdas/src/handlers/api-gateway-coverage.test.ts` — new file; 28 tests:
+    - Per-handler `describe` blocks (auth, bookings, schools, reviews, misc)
+    - Full cross-handler orphan check
+    - 16 unit tests for the `isRouteReachable()` matching logic
+  - Test suite grew from 105 → 133 passing tests across 15 files
+  - Branch `claude/loving-borg` pushed to GitHub
+  - `docs/DEFECT_LOG.md` — DEF-010 added
+- **Open Questions:**
+  - `terraform apply` has not been run yet — the API Gateway route fixes are committed but not yet live in AWS. The original "Failed to add slot" error will persist in production until apply is run.
+- **Next Recommended Step:** Run `cd infra/terraform && terraform apply` to deploy the API Gateway changes. Verify with a real browser session (or `curl` with a live JWT) that `POST /availability/add` returns 200 for `tutor1.lincoln@lincoln.edu`.
+- **References:**
+  - `DEFECT_LOG.md` DEF-010 — full root cause and fix details
+  - `infra/terraform/api-gateway.tf` — route configuration
+  - `backend/lambdas/src/handlers/api-gateway-coverage.test.ts` — regression test suite
+  - Branch: `claude/loving-borg`
+
+---
+
 ### Template for Future Sessions
 
 ```

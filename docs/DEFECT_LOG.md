@@ -149,6 +149,32 @@ Durable record of bugs encountered, their root causes, resolutions, and preventi
 
 ---
 
+### DEF-010
+
+- **Date:** 2026-04-01
+- **Area:** Infrastructure — API Gateway route coverage
+- **Severity:** High
+- **Status:** Resolved
+- **Summary:** `tutor1.lincoln@lincoln.edu` received "Failed to add slot" on the Tutor Dashboard. Audit revealed six further routes silently 404'd for all users.
+- **Root Cause:** Six Lambda handler routes had no matching entry in the AWS API Gateway v2 Terraform configuration (`infra/terraform/api-gateway.tf`). API Gateway returned `{"message":"Not Found"}` before the Lambda was ever invoked — the Lambda router never saw the request, so no application-level error was generated.
+  - `POST /availability/{proxy+}` — entirely absent → Add Slot always failed (original bug)
+  - `DELETE /availability/{proxy+}` — entirely absent → Delete Slot silently 404'd
+  - `PATCH /availability/{proxy+}` — entirely absent → Edit Slot silently 404'd
+  - `GET /schools/{domain}` (exact param route) — did not cover sub-paths; `GET /schools/{domain}/tutors` (tutor search) was unreachable
+  - `GET /stats/{proxy+}` — was wired to the `misc` Lambda; that Lambda has no stats handler, so it returned 404 from the Lambda router
+  - `GET /audit-log/{proxy+}` — same as stats: routed to wrong Lambda
+- **Resolution:**
+  - Replaced `GET /schools/{domain}` with `GET /schools/{proxy+}` to cover all school sub-paths
+  - Added `POST /availability/{proxy+}`, `DELETE /availability/{proxy+}`, `PATCH /availability/{proxy+}`
+  - Added `GET /stats/{proxy+}` and `GET /audit-log/{proxy+}` under the `schools` handler (where the implementations live)
+  - Removed the two stale `misc` handler entries for stats and audit-log
+- **Verification:** All 133 unit tests pass (including 28 new API Gateway coverage tests). Confirmed via `npx vitest run` in `backend/lambdas/`.
+- **Prevention Notes:** Added `backend/lambdas/src/handlers/api-gateway-coverage.test.ts` — a Vitest suite that dynamically parses every Lambda handler route and every Terraform API Gateway route, then asserts full coverage using all three API Gateway v2 matching rules (exact, `{proxy+}`, `{param}`). CI will now fail if any Lambda route is added without a corresponding gateway entry.
+- **Related Files:** `infra/terraform/api-gateway.tf`, `backend/lambdas/src/handlers/api-gateway-coverage.test.ts`
+- **Branch:** `claude/loving-borg`
+
+---
+
 ## Accepted Constraints
 
 ### AC-001
