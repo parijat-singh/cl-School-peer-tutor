@@ -23,14 +23,10 @@ import {
   AdminGetUserCommand,
   AdminUpdateUserAttributesCommand,
 } from "@aws-sdk/client-cognito-identity-provider";
-import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, PutCommand } from "@aws-sdk/lib-dynamodb";
 
-const POOL_ID      = process.env.COGNITO_USER_POOL_ID;
-const REGION       = process.env.AWS_REGION ?? "us-east-1";
-const USERS_TABLE  = process.env.DDB_TABLE_USERS   ?? "pt-users";
-const SCHOOL_TABLE = process.env.DDB_TABLE_SCHOOLS ?? "pt-schools";
-const PASSWORD     = "TestTutor123!";   // matches E2E spec
+const POOL_ID  = process.env.COGNITO_USER_POOL_ID;
+const REGION   = process.env.AWS_REGION ?? "us-east-1";
+const PASSWORD = "TestTutor123!";   // matches E2E spec
 
 if (!POOL_ID) {
   process.stderr.write("Error: COGNITO_USER_POOL_ID is not set\n");
@@ -38,9 +34,6 @@ if (!POOL_ID) {
 }
 
 const cognito = new CognitoIdentityProviderClient({ region: REGION });
-const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({ region: REGION }), {
-  marshallOptions: { removeUndefinedValues: true },
-});
 
 async function upsertCognitoUser(email, role, schoolDomain, password) {
   try {
@@ -81,63 +74,13 @@ async function upsertCognitoUser(email, role, schoolDomain, password) {
   }
 }
 
-const NOW = new Date().toISOString();
-
-// 1. Ensure testschool.edu exists as an approved school
-await ddb.send(new PutCommand({
-  TableName: SCHOOL_TABLE,
-  Item: {
-    domain: "testschool.edu",
-    name: "Test School",
-    type: "high",
-    approved: true,
-    status: "active",
-    brandColor: "#3B82F6",
-    subjects: ["Math", "English", "Science"],
-    createdAt: NOW,
-  },
-}));
-
-// 2. Create tutor account
+// 1. Create tutor account
 const tutorEmail = "test-tutor@testschool.edu";
 const tutorUid   = await upsertCognitoUser(tutorEmail, "tutor", "testschool.edu", PASSWORD);
-await ddb.send(new PutCommand({
-  TableName: USERS_TABLE,
-  Item: {
-    uid: tutorUid,
-    email: tutorEmail,
-    name: "Test Tutor",
-    role: "tutor",
-    schoolDomain: "testschool.edu",
-    status: "active",
-    subjects: ["Math", "English"],
-    bio: "E2E test tutor account.",
-    avgRating: 4.5,
-    reviewCount: 2,
-    isActive: true,
-    createdAt: NOW,
-    updatedAt: NOW,
-  },
-}));
 
-// 3. Create tutee account (password: TestTutee123! — matches E2E spec)
+// 2. Create tutee account (password: TestTutee123! — matches E2E spec)
 const tuteeEmail = "test-tutee@testschool.edu";
-const tuteeUid   = await upsertCognitoUser(tuteeEmail, "tutee", "testschool.edu", "TestTutee123!");
-await ddb.send(new PutCommand({
-  TableName: USERS_TABLE,
-  Item: {
-    uid: tuteeUid,
-    email: tuteeEmail,
-    name: "Test Tutee",
-    role: "tutee",
-    schoolDomain: "testschool.edu",
-    status: "active",
-    grade: "10th",
-    subjects: [],
-    createdAt: NOW,
-    updatedAt: NOW,
-  },
-}));
+await upsertCognitoUser(tuteeEmail, "tutee", "testschool.edu", "TestTutee123!");
 
 // Output tutor UID for CI to capture
 process.stdout.write(tutorUid + "\n");
