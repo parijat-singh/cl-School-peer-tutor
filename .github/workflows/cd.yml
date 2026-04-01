@@ -23,7 +23,7 @@ on:
   workflow_run:
     workflows: ["CI"]
     types: [completed]
-    branches: [master, develop]
+    branches: [master, develop, "claude/**"]
   workflow_dispatch:
     inputs:
       sha:
@@ -57,6 +57,7 @@ jobs:
           elif [ "${{ github.event.workflow_run.head_branch }}" = "master" ]; then
             echo "environment=production" >> "$GITHUB_OUTPUT"
           else
+            # develop and claude/** branches → staging
             echo "environment=staging" >> "$GITHUB_OUTPUT"
           fi
 
