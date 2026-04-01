@@ -111,23 +111,17 @@ jobs:
         run: |
           cd backend/lambdas
           npm ci --prefer-offline
-          npm run test -- --coverage
+          npm run test:ci -- --coverage
 
   # ──────────────────────────────────────────────────────────────────
-  # JOB 5: E2E tests - DynamoDB Local + Lambda local server tests
+  # JOB 5: Integration tests (DynamoDB fully mocked via aws-sdk-client-mock)
   # ──────────────────────────────────────────────────────────────────
-  e2e-tests:
-    name: "Test: Integration + E2E"
+  integration-tests:
+    name: "Test: Integration"
     runs-on: ubuntu-latest
     needs: [secret-scan]
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
 
       - uses: actions/setup-node@v4
         with:
@@ -137,46 +131,82 @@ jobs:
             backend/lambdas/package-lock.json
             frontend/package-lock.json
 
-      - name: Install backend dependencies
-        run: |
-          cd backend/lambdas
-          npm ci --prefer-offline
-
-      - name: Start DynamoDB Local
-        run: |
-          mkdir -p /tmp/dynamodb-local
-          cd /tmp/dynamodb-local
-          curl -sL https://d1ni2b6xgvw0s0.cloudfront.net/v2.x/dynamodb_local_latest.tar.gz | tar xz
-          java -Djava.library.path=./DynamoDBLocal_lib -jar DynamoDBLocal.jar -sharedDb -port 8000 &
-          sleep 3
-          echo "DynamoDB Local started"
-
-      - name: Create DynamoDB tables and seed data
-        env:
-          AWS_ACCESS_KEY_ID: fakeAccessKey
-          AWS_SECRET_ACCESS_KEY: fakeSecretKey
-          AWS_DEFAULT_REGION: us-east-1
-          DYNAMODB_ENDPOINT: http://localhost:8000
-        run: |
-          cd backend/lambdas
-          npx tsx src/scripts/create-tables.ts 2>/dev/null || echo "Tables script not found, skipping"
-          npx tsx src/scripts/seed-data.ts 2>/dev/null || echo "Seed script not found, skipping"
-
       - name: Backend integration tests
         env:
           AWS_ACCESS_KEY_ID: fakeAccessKey
           AWS_SECRET_ACCESS_KEY: fakeSecretKey
           AWS_DEFAULT_REGION: us-east-1
-          DYNAMODB_ENDPOINT: http://localhost:8000
         run: |
           cd backend/lambdas
-          npm run test:integration 2>/dev/null || echo "No integration tests configured yet"
+          npm ci --prefer-offline
+          npm run test:integration
 
       - name: Frontend integration tests
         run: |
           cd frontend
           npm ci --prefer-offline
-          npm run test:integration 2>/dev/null || echo "No integration tests configured yet"
+          npm run test:integration
+
+  # ──────────────────────────────────────────────────────────────────
+  # JOB 6: Playwright E2E tests (requires Cognito secrets — skipped on forks)
+  # Set VITE_COGNITO_USER_POOL_ID and related secrets to enable.
+  # ──────────────────────────────────────────────────────────────────
+  e2e-tests:
+    name: "Test: E2E (Playwright)"
+    runs-on: ubuntu-latest
+    needs: [secret-scan]
+    env:
+      VITE_COGNITO_USER_POOL_ID: ${{ secrets.VITE_COGNITO_USER_POOL_ID }}
+      VITE_COGNITO_CLIENT_ID:    ${{ secrets.VITE_COGNITO_CLIENT_ID }}
+      VITE_API_URL:              ${{ secrets.VITE_API_URL }}
+      VITE_AWS_REGION:           ${{ secrets.VITE_AWS_REGION }}
+      VITE_RECAPTCHA_SITE_KEY:   ${{ secrets.VITE_RECAPTCHA_SITE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+
+      - name: Check if Cognito secrets are configured
+        id: secrets-check
+        run: |
+          if [ -z "$VITE_COGNITO_USER_POOL_ID" ]; then
+            echo "configured=false" >> $GITHUB_OUTPUT
+            echo "::notice::Skipping E2E — set VITE_COGNITO_USER_POOL_ID (and related) secrets to enable"
+          else
+            echo "configured=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install root dependencies (Playwright)
+        if: steps.secrets-check.outputs.configured == 'true'
+        run: npm ci --prefer-offline
+
+      - name: Install Playwright browsers
+        if: steps.secrets-check.outputs.configured == 'true'
+        run: npx playwright install chromium --with-deps
+
+      - name: Install frontend dependencies
+        if: steps.secrets-check.outputs.configured == 'true'
+        run: |
+          cd frontend
+          npm ci --prefer-offline
+
+      - name: Run Playwright E2E tests
+        if: steps.secrets-check.outputs.configured == 'true'
+        run: npm run test:e2e
+
+      - name: Upload Playwright report
+        if: steps.secrets-check.outputs.configured == 'true' && failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
 
   # ──────────────────────────────────────────────────────────────────
   # All jobs must pass before CD is allowed to deploy.
@@ -184,7 +214,7 @@ jobs:
   ci-passed:
     name: "CI passed"
     runs-on: ubuntu-latest
-    needs: [secret-scan, dependency-scan, sast-scan, unit-tests, e2e-tests]
+    needs: [secret-scan, dependency-scan, sast-scan, unit-tests, integration-tests, e2e-tests]
     env:
       RESEND_API_KEY:     ${{ secrets.RESEND_API_KEY }}
       RESEND_FROM_EMAIL:  ${{ secrets.RESEND_FROM_EMAIL }}
@@ -226,7 +256,7 @@ jobs:
   notify-failure:
     name: "Notify: CI failed"
     runs-on: ubuntu-latest
-    needs: [secret-scan, dependency-scan, sast-scan, unit-tests, e2e-tests]
+    needs: [secret-scan, dependency-scan, sast-scan, unit-tests, integration-tests, e2e-tests]
     if: failure()
     env:
       RESEND_API_KEY:     ${{ secrets.RESEND_API_KEY }}
@@ -245,8 +275,9 @@ jobs:
           RESULT_SECRETS:  ${{ needs.secret-scan.result }}
           RESULT_DEPS:     ${{ needs.dependency-scan.result }}
           RESULT_SAST:     ${{ needs.sast-scan.result }}
-          RESULT_UNIT:     ${{ needs.unit-tests.result }}
-          RESULT_E2E:      ${{ needs.e2e-tests.result }}
+          RESULT_UNIT:         ${{ needs.unit-tests.result }}
+          RESULT_INTEGRATION:  ${{ needs.integration-tests.result }}
+          RESULT_E2E:          ${{ needs.e2e-tests.result }}
         run: |
           SHORT_SHA="${GH_SHA:0:7}"
           API_KEY="${RESEND_API_KEY:-$SMTP_PASS}"
@@ -256,8 +287,9 @@ jobs:
           [ "$RESULT_SECRETS" = "failure" ] && FAILED="${FAILED}- Secrets (Gitleaks)<br>"
           [ "$RESULT_DEPS"    = "failure" ] && FAILED="${FAILED}- Dependencies<br>"
           [ "$RESULT_SAST"   = "failure" ] && FAILED="${FAILED}- SAST (CodeQL)<br>"
-          [ "$RESULT_UNIT"   = "failure" ] && FAILED="${FAILED}- Unit tests<br>"
-          [ "$RESULT_E2E"    = "failure" ] && FAILED="${FAILED}- E2E<br>"
+          [ "$RESULT_UNIT"        = "failure" ] && FAILED="${FAILED}- Unit tests<br>"
+          [ "$RESULT_INTEGRATION" = "failure" ] && FAILED="${FAILED}- Integration tests<br>"
+          [ "$RESULT_E2E"         = "failure" ] && FAILED="${FAILED}- E2E (Playwright)<br>"
           SAFE_MSG=$(echo "$GH_MSG" | head -1)
           PAYLOAD=$(jq -n \
             --arg from "SPT Admin <$FROM>" \
