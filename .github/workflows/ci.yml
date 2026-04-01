@@ -197,8 +197,22 @@ jobs:
           cd frontend
           npm ci --prefer-offline
 
+      - name: Seed E2E test accounts
+        if: steps.secrets-check.outputs.configured == 'true'
+        id: seed
+        env:
+          COGNITO_USER_POOL_ID: ${{ env.VITE_COGNITO_USER_POOL_ID }}
+          AWS_ACCESS_KEY_ID:    ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: us-east-1
+        run: |
+          TUTOR_UID=$(node scripts/seed-e2e-accounts.mjs)
+          echo "tutor_uid=$TUTOR_UID" >> $GITHUB_OUTPUT
+
       - name: Run Playwright E2E tests
         if: steps.secrets-check.outputs.configured == 'true'
+        env:
+          E2E_TUTOR_UID: ${{ steps.seed.outputs.tutor_uid }}
         run: npm run test:e2e
 
       - name: Upload Playwright report
