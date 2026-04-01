@@ -43,7 +43,7 @@ Compact log of working sessions with key decisions, changes made, open questions
   - The only Firebase import is in `scripts/migrate-firestore-to-dynamodb.ts` — a one-time migration utility, not production code
   - Firebase API key in `.env.production` was rotated and Firebase project was deleted by user
 - **Changes Made:**
-  - User manually deleted `AIzaSyDDbk6xoC3nkEn28scrmGfFGg6L9VJHojE` API key via Firebase console
+  - User manually deleted `[REDACTED — rotated and invalidated]` API key via Firebase console
   - User manually deleted `peertutor-prod` Firebase project
 - **Open Questions:**
   - `.env.production` still contains stale Firebase variable declarations — these should be removed
