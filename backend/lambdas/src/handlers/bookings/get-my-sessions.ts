@@ -24,5 +24,6 @@ export async function getMySessions(
     ScanIndexForward: false,
   }));
 
-  return json({ sessions: result.Items ?? [] });
+  const sessions = (result.Items ?? []).map((item) => ({ ...item, id: item.sessionId }));
+  return json({ sessions });
 }

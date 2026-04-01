@@ -24,5 +24,6 @@ export async function getMyBookingRequests(
     ScanIndexForward: false,
   }));
 
-  return json({ requests: result.Items ?? [] });
+  const requests = (result.Items ?? []).map((item) => ({ ...item, id: item.requestId }));
+  return json({ requests });
 }

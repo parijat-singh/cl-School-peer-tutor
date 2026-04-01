@@ -19,5 +19,6 @@ export async function getTutorReviews(
     ScanIndexForward: false,
   }));
 
-  return json({ reviews: result.Items ?? [] });
+  const reviews = (result.Items ?? []).map((item) => ({ ...item, id: item.reviewId }));
+  return json({ reviews });
 }

@@ -28,5 +28,6 @@ export async function getAuditLog(
     Limit: 100,
   }));
 
-  return json({ entries: result.Items ?? [] });
+  const entries = (result.Items ?? []).map((item) => ({ ...item, id: item.timestampLogId }));
+  return json({ entries });
 }

@@ -149,5 +149,6 @@ export async function getTutorSlots(
     ExpressionAttributeValues: { ":uid": uid },
   }));
 
-  return json({ slots: result.Items ?? [] });
+  const slots = (result.Items ?? []).map((item) => ({ ...item, id: item.slotId }));
+  return json({ slots });
 }
