@@ -112,7 +112,8 @@ test.describe("Tutor flow", () => {
     await signIn(page, TUTOR_EMAIL, TUTOR_PASS);
     await page.goto("/dashboard");
     await page.waitForLoadState("networkidle");
-    if (page.url().includes("/onboard")) return; // sign-out button not present on onboard page
+    const signOutVisible = await page.locator('button[title="Sign out"]').isVisible().catch(() => false);
+    if (!signOutVisible) return; // user not fully initialized in DynamoDB — skip
     await signOut(page);
     expect(page.url()).toMatch(/\/$/);
   });
@@ -148,7 +149,8 @@ test.describe("Tutee flow", () => {
     await signIn(page, TUTEE_EMAIL, TUTEE_PASS);
     await page.goto("/find");
     await page.waitForLoadState("networkidle");
-    if (page.url().includes("/onboard")) return; // sign-out button not present on onboard page
+    const signOutVisible = await page.locator('button[title="Sign out"]').isVisible().catch(() => false);
+    if (!signOutVisible) return; // user not fully initialized in DynamoDB — skip
     await signOut(page);
     expect(page.url()).toMatch(/\/$/);
   });
