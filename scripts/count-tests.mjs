@@ -1,26 +1,31 @@
 #!/usr/bin/env node
 /**
- * Count unit and integration tests from Vitest/Jest-style test files.
- * Integration: path contains "integration" or filename contains ".integration.test."
- * Unit: all other tests.
+ * Count all automated tests and update the README test-count badge section.
+ *
+ * Categories:
+ *   Unit        — *.test.ts(x), excluding *.integration.test.*
+ *   Integration — *.integration.test.ts(x)
+ *   E2E         — e2e/**\/*.spec.ts (Playwright)
+ *
+ * Updates README.md between <!-- TEST-COUNT-START --> and <!-- TEST-COUNT-END -->.
  */
 
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 
-const root = process.cwd();
-const frontend = join(root, "frontend", "src");
-const backend = join(root, "backend", "functions", "src");
+const root = new URL("..", import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1");
 
-function findTestFiles(dir, base = dir) {
+// ── File discovery ─────────────────────────────────────────────────────────
+
+function walk(dir, ext) {
   const results = [];
   try {
     for (const ent of readdirSync(dir, { withFileTypes: true })) {
       const full = join(dir, ent.name);
-      if (ent.isDirectory()) {
-        results.push(...findTestFiles(full, base));
-      } else if (ent.name.match(/\.test\.(ts|tsx)$/)) {
-        results.push(relative(base, full));
+      if (ent.isDirectory() && ent.name !== "node_modules") {
+        results.push(...walk(full, ext));
+      } else if (ext.test(ent.name)) {
+        results.push(full);
       }
     }
   } catch (_) {
@@ -29,45 +34,81 @@ function findTestFiles(dir, base = dir) {
   return results;
 }
 
-function collectTestFiles(dir) {
-  return findTestFiles(dir, dir);
-}
+// ── Test counter ───────────────────────────────────────────────────────────
 
-function countTests(absolutePath) {
-  let content;
+function countTests(filePath) {
   try {
-    content = readFileSync(absolutePath, "utf8");
+    const src = readFileSync(filePath, "utf8");
+    return (src.match(/\bit\s*\(/g)?.length ?? 0) + (src.match(/\btest\s*\(/g)?.length ?? 0);
   } catch {
     return 0;
   }
-  const itMatches = content.match(/\bit\s*\(/g);
-  const testMatches = content.match(/\btest\s*\(/g);
-  return (itMatches?.length ?? 0) + (testMatches?.length ?? 0);
 }
 
-function isIntegration(pathOrName) {
-  const p = pathOrName.replace(/\\/g, "/");
-  return p.includes("integration") || p.includes(".integration.test.");
-}
+// ── Collect by category ────────────────────────────────────────────────────
+
+const vitestExt = /\.test\.(ts|tsx)$/;
+const playwrightExt = /\.spec\.ts$/;
+
+const vitest = [
+  ...walk(join(root, "frontend", "src"), vitestExt),
+  ...walk(join(root, "backend", "lambdas", "src"), vitestExt),
+];
+
+const e2eFiles = walk(join(root, "e2e"), playwrightExt);
 
 let unit = 0;
 let integration = 0;
 
-for (const rel of collectTestFiles(frontend)) {
-  const full = join(frontend, rel);
-  const n = countTests(full);
-  if (isIntegration(rel)) integration += n;
+for (const f of vitest) {
+  const rel = relative(root, f).replace(/\\/g, "/");
+  const n = countTests(f);
+  if (rel.includes(".integration.test.")) integration += n;
   else unit += n;
 }
 
-for (const rel of collectTestFiles(backend)) {
-  const full = join(backend, rel);
-  const n = countTests(full);
-  if (isIntegration(rel)) integration += n;
-  else unit += n;
+let e2e = 0;
+for (const f of e2eFiles) {
+  e2e += countTests(f);
 }
 
-const total = unit + integration;
-console.log("Unit tests:       ", unit);
-console.log("Integration tests:", integration);
-console.log("Total tests:      ", total);
+const total = unit + integration + e2e;
+
+// ── Console output ─────────────────────────────────────────────────────────
+
+console.log(`Unit tests:        ${unit}`);
+console.log(`Integration tests: ${integration}`);
+console.log(`E2E tests:         ${e2e}`);
+console.log(`Total:             ${total}`);
+
+// ── README update ──────────────────────────────────────────────────────────
+
+const readmePath = join(root, "README.md");
+let readme;
+try {
+  readme = readFileSync(readmePath, "utf8");
+} catch {
+  console.error("README.md not found — skipping update");
+  process.exit(0);
+}
+
+const block = `<!-- TEST-COUNT-START -->
+| Test type | Count |
+|---|---|
+| Unit | ${unit} |
+| Integration | ${integration} |
+| E2E (Playwright) | ${e2e} |
+| **Total** | **${total}** |
+<!-- TEST-COUNT-END -->`;
+
+const updated = readme.replace(
+  /<!-- TEST-COUNT-START -->[\s\S]*?<!-- TEST-COUNT-END -->/,
+  block
+);
+
+if (updated === readme) {
+  console.warn("Warning: <!-- TEST-COUNT-START/END --> markers not found in README.md");
+} else {
+  writeFileSync(readmePath, updated, "utf8");
+  console.log("\nREADME.md updated.");
+}

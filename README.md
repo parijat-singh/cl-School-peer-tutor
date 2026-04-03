@@ -2,6 +2,15 @@
 
 A multi-tenant, containerized, school-verified peer tutoring web platform built with React 18, Firebase, and Docker.
 
+<!-- TEST-COUNT-START -->
+| Test type | Count |
+|---|---|
+| Unit | 211 |
+| Integration | 0 |
+| E2E (Playwright) | 16 |
+| **Total** | **227** |
+<!-- TEST-COUNT-END -->
+
 ---
 
 ## Architecture

@@ -1,11 +1,15 @@
 {
   "scripts": {
-    "count-tests": "node scripts/count-tests.mjs"
+    "count-tests": "node scripts/count-tests.mjs",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:headed": "playwright test --headed"
   },
   "devDependencies": {
     "@aws-sdk/client-cognito-identity-provider": "^3.1020.0",
     "@aws-sdk/client-dynamodb": "^3.1020.0",
     "@aws-sdk/lib-dynamodb": "^3.1020.0",
+    "@playwright/test": "^1.59.1",
     "playwright": "^1.58.2"
   }
 }
