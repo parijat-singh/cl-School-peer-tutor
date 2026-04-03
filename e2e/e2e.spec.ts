@@ -4,8 +4,7 @@ const TUTOR_EMAIL = "test-tutor@testschool.edu";
 const TUTOR_PASS  = "TestTutor123!";
 const TUTEE_EMAIL = "test-tutee@testschool.edu";
 const TUTEE_PASS  = "TestTutee123!";
-// Set by CI seed step; falls back to a known local dev UID
-const TUTOR_UID   = process.env.E2E_TUTOR_UID ?? "b4c8c458-20d1-705e-f4d9-77e8e7b166be";
+const TUTOR_UID = process.env.E2E_TUTOR_UID ?? "a4185488-6061-7080-639a-dea069187afd";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
